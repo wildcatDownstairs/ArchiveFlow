@@ -3,8 +3,11 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
+use crate::domain::task::ArchiveType;
+use chrono::{DateTime, Utc};
+
 /// 攻击模式
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AttackMode {
     /// 字典攻击：逐个尝试给定的密码列表
@@ -24,6 +27,23 @@ pub enum AttackMode {
 pub struct RecoveryConfig {
     pub task_id: String,
     pub mode: AttackMode,
+}
+
+/// 恢复断点：用于应用重启后继续上一次恢复
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryCheckpoint {
+    /// 属于哪个任务
+    pub task_id: String,
+    /// 继续恢复时要复用的攻击模式
+    pub mode: AttackMode,
+    /// 归档类型，用来校验断点是否还匹配当前任务
+    pub archive_type: ArchiveType,
+    /// 已经尝试过多少个候选
+    pub tried: u64,
+    /// 总候选空间大小
+    pub total: u64,
+    /// 最近一次保存断点的时间
+    pub updated_at: DateTime<Utc>,
 }
 
 /// 恢复状态

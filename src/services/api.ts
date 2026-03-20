@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { Task, ArchiveInfo, RecoveryProgress, AuditEvent, ExportFormat } from "@/types"
+import type {
+  Task,
+  ArchiveInfo,
+  RecoveryProgress,
+  AuditEvent,
+  ExportFormat,
+  RecoveryCheckpoint,
+} from "@/types"
 
 export async function getTasks(): Promise<Task[]> {
   return invoke<Task[]>("get_tasks")
@@ -59,6 +66,16 @@ export async function startRecovery(
 /// 取消密码恢复
 export async function cancelRecovery(taskId: string): Promise<void> {
   return invoke<void>("cancel_recovery", { taskId })
+}
+
+export async function getRecoveryCheckpoint(
+  taskId: string,
+): Promise<RecoveryCheckpoint | null> {
+  return invoke<RecoveryCheckpoint | null>("get_recovery_checkpoint", { taskId })
+}
+
+export async function resumeRecovery(taskId: string): Promise<void> {
+  return invoke<void>("resume_recovery", { taskId })
 }
 
 // --- Audit events ---

@@ -1,8 +1,10 @@
+use std::sync::{atomic::AtomicBool, Arc};
+
 use tauri::{command, AppHandle, Manager, State};
 
 use crate::db::Database;
 use crate::domain::audit::AuditEventType;
-use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryManager};
+use crate::domain::recovery::{AttackMode, RecoveryCheckpoint, RecoveryConfig, RecoveryManager};
 use crate::domain::task::{ArchiveType, TaskStatus};
 use crate::errors::AppError;
 use crate::services::audit_service;
@@ -34,6 +36,111 @@ fn describe_attack_mode(mode: &AttackMode) -> String {
     }
 }
 
+/// 统一判断任务状态是否允许启动或继续恢复。
+/// 这里单独提成函数，避免 `start_recovery` 和 `resume_recovery`
+/// 两条命令未来出现状态判断不一致的问题。
+fn can_start_recovery(status: &TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Ready
+            | TaskStatus::Failed
+            | TaskStatus::Cancelled
+            | TaskStatus::Exhausted
+            | TaskStatus::Interrupted
+    )
+}
+
+/// 后台线程真正执行恢复，并在结束时统一处理 DB 状态和审计。
+/// 对 Rust 新手来说，这里把“线程里做什么”集中在一个函数里更容易跟踪，
+/// 也能避免 `start` / `resume` 两个入口各自复制一份收尾逻辑。
+fn spawn_recovery_worker(
+    task_id: String,
+    file_path: String,
+    archive_type: ArchiveType,
+    config: RecoveryConfig,
+    cancel_flag: Arc<AtomicBool>,
+    app_handle: AppHandle,
+) {
+    std::thread::spawn(move || {
+        let result = recovery_service::run_recovery(
+            config,
+            file_path,
+            archive_type,
+            app_handle.clone(),
+            cancel_flag,
+        );
+
+        let db = app_handle.state::<Database>();
+        let recovery_mgr = app_handle.state::<RecoveryManager>();
+
+        match result {
+            Ok(RecoveryResult::Found(password)) => {
+                log::info!("恢复成功: {} 密码={}", task_id, password);
+                let _ =
+                    db.update_task_recovery_result(&task_id, "succeeded", None, Some(&password));
+                // 成功后 checkpoint 已经没有继续意义，主动删除，避免下次误续跑。
+                let _ = db.delete_recovery_checkpoint(&task_id);
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::RecoverySucceeded,
+                    Some(task_id.clone()),
+                    format!("密码恢复成功: {}", task_id),
+                );
+            }
+            Ok(RecoveryResult::Exhausted) => {
+                log::info!("恢复已穷尽: {}", task_id);
+                let _ = db.update_task_recovery_result(&task_id, "exhausted", None, None);
+                // 候选空间已经全部跑完，保留 checkpoint 没有价值。
+                let _ = db.delete_recovery_checkpoint(&task_id);
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::RecoveryExhausted,
+                    Some(task_id.clone()),
+                    format!("密码穷尽未找到: {}", task_id),
+                );
+            }
+            Ok(RecoveryResult::Cancelled) => {
+                log::info!("恢复已取消: {}", task_id);
+                let _ = db.update_task_recovery_result(&task_id, "cancelled", None, None);
+                // 取消时不删除 checkpoint，这样用户下次可以继续跑。
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::RecoveryCancelled,
+                    Some(task_id.clone()),
+                    format!("用户取消恢复: {}", task_id),
+                );
+            }
+            Err(err) => {
+                log::error!("恢复出错: {} - {}", task_id, err);
+                let _ = db.update_task_recovery_result(
+                    &task_id,
+                    "failed",
+                    Some(&format!("恢复出错: {}", err)),
+                    None,
+                );
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::RecoveryFailed,
+                    Some(task_id.clone()),
+                    format!("恢复出错: {} - {}", task_id, err),
+                );
+            }
+        }
+
+        // 无论成功、失败还是取消，都要把运行中的取消标志清理掉，
+        // 否则后面再次启动同一个任务会被错误地当成“仍在运行”。
+        recovery_mgr.remove(&task_id);
+    });
+}
+
+#[command]
+pub async fn get_recovery_checkpoint(
+    task_id: String,
+    db: State<'_, Database>,
+) -> Result<Option<RecoveryCheckpoint>, AppError> {
+    db.get_recovery_checkpoint(&task_id)
+}
+
 /// 启动密码恢复任务
 ///
 /// - `task_id`: 任务 ID
@@ -61,14 +168,7 @@ pub async fn start_recovery(
         ));
     }
 
-    if !matches!(
-        task.status,
-        TaskStatus::Ready
-            | TaskStatus::Failed
-            | TaskStatus::Cancelled
-            | TaskStatus::Exhausted
-            | TaskStatus::Interrupted
-    ) {
+    if !can_start_recovery(&task.status) {
         return Err(AppError::InvalidArgument(format!(
             "当前任务状态不允许启动恢复: {}",
             task.status.as_str()
@@ -176,97 +276,16 @@ pub async fn start_recovery(
 
     log::info!("恢复任务已启动: {} (模式: {})", task_id, mode);
 
-    // 5. 在后台线程中运行恢复
-    let task_id_clone = task_id.clone();
-    let app_handle_clone = app_handle.clone();
-
-    std::thread::spawn(move || {
-        let result = recovery_service::run_recovery(
-            config,
-            file_path,
-            archive_type,
-            app_handle_clone.clone(),
-            cancel_flag,
-        );
-
-        // 更新任务状态
-        // 注意：这里无法直接用 State，需要从 app_handle 获取
-        let db = app_handle_clone.state::<Database>();
-        let recovery_mgr = app_handle_clone.state::<RecoveryManager>();
-
-        match result {
-            Ok(RecoveryResult::Found(password)) => {
-                // 找到密码 → succeeded，密码持久化到专用字段
-                log::info!("恢复成功: {} 密码={}", task_id_clone, password);
-                let _ = db.update_task_recovery_result(
-                    &task_id_clone,
-                    "succeeded",
-                    None,
-                    Some(&password),
-                );
-                // 记录密码恢复成功审计事件
-                let _ = audit_service::log_audit_event(
-                    &db,
-                    AuditEventType::RecoverySucceeded,
-                    Some(task_id_clone.clone()),
-                    format!("密码恢复成功: {}", task_id_clone),
-                );
-            }
-            Ok(RecoveryResult::Exhausted) => {
-                // 穷尽所有密码 → exhausted
-                log::info!("恢复已穷尽: {}", task_id_clone);
-                let _ = db.update_task_recovery_result(&task_id_clone, "exhausted", None, None);
-                // 记录密码穷尽审计事件
-                let _ = audit_service::log_audit_event(
-                    &db,
-                    AuditEventType::RecoveryExhausted,
-                    Some(task_id_clone.clone()),
-                    format!("密码穷尽未找到: {}", task_id_clone),
-                );
-            }
-            Ok(RecoveryResult::Cancelled) => {
-                // 用户取消 → cancelled
-                log::info!("恢复已取消: {}", task_id_clone);
-                let _ = db.update_task_recovery_result(&task_id_clone, "cancelled", None, None);
-                // 记录用户取消恢复审计事件
-                let _ = audit_service::log_audit_event(
-                    &db,
-                    AuditEventType::RecoveryCancelled,
-                    Some(task_id_clone.clone()),
-                    format!("用户取消恢复: {}", task_id_clone),
-                );
-            }
-            Err(err) => {
-                // 发生错误 → failed
-                log::error!("恢复出错: {} - {}", task_id_clone, err);
-                let _ = db.update_task_recovery_result(
-                    &task_id_clone,
-                    "failed",
-                    Some(&format!("恢复出错: {}", err)),
-                    None,
-                );
-                // 记录恢复出错审计事件
-                let _ = audit_service::log_audit_event(
-                    &db,
-                    AuditEventType::RecoveryFailed,
-                    Some(task_id_clone.clone()),
-                    format!("恢复出错: {} - {}", task_id_clone, err),
-                );
-            }
-        }
-
-        // 清理取消标志
-        recovery_mgr.remove(&task_id_clone);
-    });
+    spawn_recovery_worker(task_id, file_path, archive_type, config, cancel_flag, app_handle);
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{describe_attack_mode, supports_password_recovery};
+    use super::{can_start_recovery, describe_attack_mode, supports_password_recovery};
     use crate::domain::recovery::AttackMode;
-    use crate::domain::task::ArchiveType;
+    use crate::domain::task::{ArchiveType, TaskStatus};
 
     #[test]
     fn password_recovery_supports_zip_7z_and_rar() {
@@ -308,6 +327,75 @@ mod tests {
         };
         assert_eq!(describe_attack_mode(&mode), "掩码攻击 (模式: ?d?dAB)");
     }
+
+    #[test]
+    fn interrupted_task_can_resume() {
+        assert!(can_start_recovery(&TaskStatus::Interrupted));
+    }
+}
+
+/// 继续上一次已保存断点的恢复任务。
+/// 这里不要求前端重新提交完整配置，而是直接读取数据库里的 checkpoint。
+#[command]
+pub async fn resume_recovery(
+    task_id: String,
+    db: State<'_, Database>,
+    recovery_manager: State<'_, RecoveryManager>,
+    app_handle: AppHandle,
+) -> Result<(), AppError> {
+    let task = db
+        .get_task_by_id(&task_id)?
+        .ok_or_else(|| AppError::TaskNotFound(task_id.clone()))?;
+    let checkpoint = db
+        .get_recovery_checkpoint(&task_id)?
+        .ok_or_else(|| AppError::InvalidArgument("当前任务没有可继续的恢复断点".to_string()))?;
+
+    if !supports_password_recovery(&task.archive_type) {
+        return Err(AppError::InvalidArgument(
+            "当前归档类型不支持密码恢复".to_string(),
+        ));
+    }
+    if !can_start_recovery(&task.status) {
+        return Err(AppError::InvalidArgument(format!(
+            "当前任务状态不允许继续恢复: {}",
+            task.status.as_str()
+        )));
+    }
+
+    let cancel_flag = recovery_manager
+        .try_register(&task_id)
+        .map_err(|_| AppError::InvalidArgument(format!("该任务已有运行中的恢复: {}", task_id)))?;
+
+    db.update_task_recovery_result(&task_id, "processing", None, None)?;
+    let _ = audit_service::log_audit_event(
+        &db,
+        AuditEventType::RecoveryStarted,
+        Some(task_id.clone()),
+        format!(
+            "继续密码恢复: {} ({:?}, {}, 已尝试 {}/{})",
+            task.file_name,
+            task.archive_type,
+            describe_attack_mode(&checkpoint.mode),
+            checkpoint.tried,
+            checkpoint.total
+        ),
+    );
+
+    let config = RecoveryConfig {
+        task_id: task_id.clone(),
+        mode: checkpoint.mode,
+    };
+
+    spawn_recovery_worker(
+        task_id,
+        task.file_path,
+        task.archive_type,
+        config,
+        cancel_flag,
+        app_handle,
+    );
+
+    Ok(())
 }
 
 /// 取消正在运行的恢复任务

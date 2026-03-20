@@ -86,3 +86,17 @@ export interface RecoveryProgress {
 }
 
 export type ExportFormat = "csv" | "json"
+
+export type AttackMode =
+  | { type: "dictionary"; wordlist: string[] }
+  | { type: "brute_force"; charset: string; min_length: number; max_length: number }
+  | { type: "mask"; mask: string }
+
+export interface RecoveryCheckpoint {
+  task_id: string
+  mode: AttackMode
+  archive_type: Task["archive_type"]
+  tried: number
+  total: number
+  updated_at: string
+}

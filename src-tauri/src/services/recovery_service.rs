@@ -6,10 +6,14 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use sevenz_rust::{Error as SevenZError, Password, SevenZReader};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
-use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryProgress, RecoveryStatus};
+use crate::db::Database;
+use crate::domain::recovery::{
+    AttackMode, RecoveryCheckpoint, RecoveryConfig, RecoveryProgress, RecoveryStatus,
+};
 use crate::domain::task::ArchiveType;
 use crate::services::archive_service;
 
@@ -569,6 +573,58 @@ fn create_result_channel<T>(num_workers: u64) -> (mpsc::SyncSender<T>, mpsc::Rec
     mpsc::sync_channel(capacity)
 }
 
+/// 从数据库读取断点，并判断它是否还能用于这次恢复。
+/// 这里做了两层保护：
+/// 1. 任务类型必须一致，避免用户切换了归档类型后误用旧进度。
+/// 2. 攻击模式必须一致，避免不同参数之间错误地“续跑”。
+fn load_resume_offset(
+    app_handle: &tauri::AppHandle,
+    task_id: &str,
+    mode: &AttackMode,
+    archive_type: &ArchiveType,
+    total: u64,
+) -> u64 {
+    let db = app_handle.state::<Database>();
+    match db.get_recovery_checkpoint(task_id) {
+        Ok(Some(checkpoint))
+            if checkpoint.archive_type == *archive_type && checkpoint.mode == *mode =>
+        {
+            checkpoint.tried.min(total)
+        }
+        Ok(_) => 0,
+        Err(error) => {
+            log::error!("读取恢复断点失败: task={} error={}", task_id, error);
+            0
+        }
+    }
+}
+
+/// 把当前总进度写回数据库。
+/// 这里保存的是“全局已尝试数量”，主线程在汇总进度后统一落库，
+/// 所以 worker 不需要自己直接碰数据库。
+fn persist_recovery_checkpoint(
+    app_handle: &tauri::AppHandle,
+    task_id: &str,
+    mode: &AttackMode,
+    archive_type: &ArchiveType,
+    tried: u64,
+    total: u64,
+) {
+    let db = app_handle.state::<Database>();
+    let checkpoint = RecoveryCheckpoint {
+        task_id: task_id.to_string(),
+        mode: mode.clone(),
+        archive_type: archive_type.clone(),
+        tried,
+        total,
+        updated_at: Utc::now(),
+    };
+
+    if let Err(error) = db.upsert_recovery_checkpoint(&checkpoint) {
+        log::error!("写入恢复断点失败: task={} error={}", task_id, error);
+    }
+}
+
 /// A single worker shard for ZIP archives.
 /// Opens its own ZipArchive (ZipArchive is not Send, must be per-thread).
 fn run_zip_worker_shard(
@@ -687,18 +743,22 @@ pub fn run_recovery(
         ),
         AttackMode::Mask { mask } => MaskIterator::total_combinations(mask)?,
     };
+    // 如果数据库里已经有同模式的 checkpoint，就从上次停下的位置继续。
+    // 这里的 `resume_from` 是“全局偏移量”，后面的分片也会基于它重新计算。
+    let resume_from = load_resume_offset(&app_handle, &task_id, mode.as_ref(), &archive_type, total);
+    let remaining = total.saturating_sub(resume_from);
 
     let num_workers = {
         let cpus = num_cpus::get() as u64;
         let n = std::cmp::max(1, cpus.saturating_sub(1));
         // Don't spawn more workers than there are candidates
-        std::cmp::min(n, total.max(1))
+        std::cmp::min(n, remaining.max(1))
     };
-    let shard_size = total / num_workers;
+    let shard_size = remaining / num_workers;
 
     let shards: Vec<(u64, u64)> = (0..num_workers)
         .map(|i| {
-            let start = i * shard_size;
+            let start = resume_from + i * shard_size;
             let end = if i == num_workers - 1 {
                 total
             } else {
@@ -709,16 +769,26 @@ pub fn run_recovery(
         .collect();
 
     log::info!(
-        "开始并行恢复: task={}, workers={}, total={}, archive_type={:?}",
+        "开始并行恢复: task={}, workers={}, total={}, resume_from={}, archive_type={:?}",
         task_id,
         num_workers,
         total,
+        resume_from,
         archive_type
     );
 
     // Shared state
-    let tried_counter = Arc::new(AtomicU64::new(0));
+    // tried_counter 从 resume_from 起步，这样前端看到的进度就是累计进度，而不是“本次重启后从 0 开始”。
+    let tried_counter = Arc::new(AtomicU64::new(resume_from));
     let (result_tx, result_rx) = create_result_channel::<String>(num_workers);
+    persist_recovery_checkpoint(
+        &app_handle,
+        &task_id,
+        mode.as_ref(),
+        &archive_type,
+        resume_from,
+        total,
+    );
 
     // Emit initial progress
     let start_time = Instant::now();
@@ -726,7 +796,7 @@ pub fn run_recovery(
         "recovery-progress",
         RecoveryProgress {
             task_id: task_id.clone(),
-            tried: 0,
+            tried: resume_from,
             total,
             speed: 0.0,
             status: RecoveryStatus::Running,
@@ -855,6 +925,14 @@ pub fn run_recovery(
             } else {
                 0.0
             };
+            persist_recovery_checkpoint(
+                &app_handle,
+                &task_id,
+                mode.as_ref(),
+                &archive_type,
+                current_tried,
+                total,
+            );
             let _ = app_handle.emit(
                 "recovery-progress",
                 RecoveryProgress {
@@ -888,6 +966,14 @@ pub fn run_recovery(
             };
             last_tried = current_tried;
             last_poll_time = now;
+            persist_recovery_checkpoint(
+                &app_handle,
+                &task_id,
+                mode.as_ref(),
+                &archive_type,
+                current_tried,
+                total,
+            );
 
             let _ = app_handle.emit(
                 "recovery-progress",

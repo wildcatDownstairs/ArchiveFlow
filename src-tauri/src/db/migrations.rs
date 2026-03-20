@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use thiserror::Error;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 const CREATE_TASKS_TABLE_V1_SQL: &str = "CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
@@ -37,9 +37,19 @@ const CREATE_AUDIT_EVENTS_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS audit_ev
     timestamp TEXT NOT NULL
 );";
 
+const CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS recovery_checkpoints (
+    task_id TEXT PRIMARY KEY,
+    mode_json TEXT NOT NULL,
+    archive_type TEXT NOT NULL,
+    tried INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);";
+
 const CREATE_INDEXES_SQL: &str = "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_audit_task_id ON audit_events(task_id);
-CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp);";
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_recovery_checkpoints_updated_at ON recovery_checkpoints(updated_at);";
 
 #[derive(Debug, Error)]
 pub(crate) enum MigrationError {
@@ -122,6 +132,7 @@ fn apply_migration(conn: &Connection, target_version: u32) -> Result<(), rusqlit
         2 => migrate_to_v2(conn),
         3 => migrate_to_v3(conn),
         4 => migrate_to_v4(conn),
+        5 => migrate_to_v5(conn),
         v => unreachable!("未注册的迁移版本 v{v}；请在 apply_migration 中添加对应分支"),
     }
 }
@@ -129,6 +140,7 @@ fn apply_migration(conn: &Connection, target_version: u32) -> Result<(), rusqlit
 fn create_latest_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(CREATE_TASKS_TABLE_LATEST_SQL)?;
     conn.execute_batch(CREATE_AUDIT_EVENTS_TABLE_SQL)?;
+    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL)?;
     conn.execute_batch(CREATE_INDEXES_SQL)?;
     Ok(())
 }
@@ -160,6 +172,13 @@ fn migrate_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
 
 fn migrate_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
     normalize_task_statuses(conn)?;
+    Ok(())
+}
+
+fn migrate_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // v5 新增恢复断点表。
+    // 这里把“上次跑到哪里”的状态从内存搬到数据库里，这样应用重启后还能继续。
+    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL)?;
     Ok(())
 }
 

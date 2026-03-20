@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use crate::domain::archive::ArchiveInfo;
 use crate::domain::audit::{AuditEvent, AuditEventType};
+use crate::domain::recovery::{AttackMode, RecoveryCheckpoint};
 use crate::domain::task::{ArchiveType, Task, TaskStatus};
 use crate::errors::AppError;
 use chrono::{DateTime, Utc};
@@ -247,10 +248,110 @@ impl Database {
     /// 删除任务
     pub fn delete_task(&self, id: &str) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM recovery_checkpoints WHERE task_id = ?1",
+            params![id],
+        )?;
         let deleted = conn.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
         if deleted == 0 {
             return Err(AppError::TaskNotFound(id.to_string()));
         }
+        Ok(())
+    }
+
+    // ─── Recovery Checkpoints ───────────────────────────────────────
+
+    fn parse_recovery_checkpoint_row(
+        row: &rusqlite::Row,
+    ) -> rusqlite::Result<RecoveryCheckpoint> {
+        // SQLite 里保存的是字符串和整数，这里把它们重新组装成业务结构体，
+        // 这样上层代码就不需要关心底层表结构细节。
+        let mode_json: String = row.get(1)?;
+        let archive_type_str: String = row.get(2)?;
+        let tried: i64 = row.get(3)?;
+        let total: i64 = row.get(4)?;
+        let updated_at_str: String = row.get(5)?;
+
+        let mode: AttackMode = serde_json::from_str(&mode_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        let archive_type: ArchiveType =
+            serde_json::from_value(serde_json::Value::String(archive_type_str))
+                .unwrap_or(ArchiveType::Unknown);
+        let updated_at: DateTime<Utc> = DateTime::parse_from_rfc3339(&updated_at_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        Ok(RecoveryCheckpoint {
+            task_id: row.get(0)?,
+            mode,
+            archive_type,
+            tried: tried as u64,
+            total: total as u64,
+            updated_at,
+        })
+    }
+
+    pub fn upsert_recovery_checkpoint(&self, checkpoint: &RecoveryCheckpoint) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mode_json = serde_json::to_string(&checkpoint.mode)?;
+        let archive_type_str = serde_json::to_value(&checkpoint.archive_type)?
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        conn.execute(
+            "INSERT INTO recovery_checkpoints (task_id, mode_json, archive_type, tried, total, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(task_id) DO UPDATE SET
+                mode_json = excluded.mode_json,
+                archive_type = excluded.archive_type,
+                tried = excluded.tried,
+                total = excluded.total,
+                updated_at = excluded.updated_at",
+            params![
+                checkpoint.task_id,
+                mode_json,
+                archive_type_str,
+                checkpoint.tried as i64,
+                checkpoint.total as i64,
+                checkpoint.updated_at.to_rfc3339(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn get_recovery_checkpoint(
+        &self,
+        task_id: &str,
+    ) -> Result<Option<RecoveryCheckpoint>, AppError> {
+        // checkpoint 是“可选”的：新任务或从未开始过恢复的任务本来就没有断点。
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT task_id, mode_json, archive_type, tried, total, updated_at
+             FROM recovery_checkpoints WHERE task_id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![task_id], Self::parse_recovery_checkpoint_row)?;
+
+        match rows.next() {
+            Some(checkpoint) => Ok(Some(checkpoint?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn delete_recovery_checkpoint(&self, task_id: &str) -> Result<(), AppError> {
+        // 删除时不把“没找到记录”当成错误，因为成功/穷尽后的清理逻辑会重复调用这里。
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM recovery_checkpoints WHERE task_id = ?1",
+            params![task_id],
+        )?;
         Ok(())
     }
 
@@ -358,6 +459,7 @@ impl Database {
     /// 清除所有任务
     pub fn clear_all_tasks(&self) -> Result<u64, AppError> {
         let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM recovery_checkpoints", [])?;
         let count = conn.execute("DELETE FROM tasks", [])?;
         Ok(count as u64)
     }
@@ -482,6 +584,19 @@ mod tests {
         }
     }
 
+    fn make_test_checkpoint(task_id: &str) -> RecoveryCheckpoint {
+        RecoveryCheckpoint {
+            task_id: task_id.to_string(),
+            mode: AttackMode::Mask {
+                mask: "?d?d?d?d".to_string(),
+            },
+            archive_type: ArchiveType::Zip,
+            tried: 123,
+            total: 10_000,
+            updated_at: Utc::now(),
+        }
+    }
+
     fn make_test_audit_event(id: &str, task_id: Option<&str>) -> AuditEvent {
         AuditEvent {
             id: id.to_string(),
@@ -534,6 +649,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(audit_count, 1);
+
+        let checkpoint_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='recovery_checkpoints'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(checkpoint_count, 1);
     }
 
     #[test]
@@ -761,6 +885,29 @@ mod tests {
         let result = db.delete_task("nonexistent");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), AppError::TaskNotFound(_)));
+    }
+
+    #[test]
+    fn recovery_checkpoint_roundtrip_and_delete() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+        db.insert_task(&make_test_task("t1")).unwrap();
+
+        let checkpoint = make_test_checkpoint("t1");
+        db.upsert_recovery_checkpoint(&checkpoint).unwrap();
+
+        let fetched = db.get_recovery_checkpoint("t1").unwrap().unwrap();
+        assert_eq!(fetched.task_id, "t1");
+        assert_eq!(fetched.tried, 123);
+        assert_eq!(
+            fetched.mode,
+            AttackMode::Mask {
+                mask: "?d?d?d?d".to_string()
+            }
+        );
+
+        db.delete_recovery_checkpoint("t1").unwrap();
+        assert!(db.get_recovery_checkpoint("t1").unwrap().is_none());
     }
 
     #[test]

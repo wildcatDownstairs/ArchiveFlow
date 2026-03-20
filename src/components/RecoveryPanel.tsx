@@ -18,7 +18,7 @@ import { formatElapsed } from "@/lib/format"
 import { buildDictionaryCandidates } from "@/lib/recoveryCandidates"
 import { useAppStore } from "@/stores/appStore"
 import * as api from "@/services/api"
-import type { RecoveryProgress, RecoveryStatus, Task } from "@/types"
+import type { RecoveryCheckpoint, RecoveryProgress, RecoveryStatus, Task } from "@/types"
 
 // 预定义字符集
 const CHARSETS = {
@@ -66,6 +66,7 @@ export default function RecoveryPanel({
 
   // 恢复状态
   const [progress, setProgress] = useState<RecoveryProgress | null>(null)
+  const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null)
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
@@ -104,6 +105,30 @@ export default function RecoveryPanel({
       unlistenRef.current = null
     }
   }, [isRunning, task.id, onTaskStatusChange])
+
+  useEffect(() => {
+    if (isRunning) return
+
+    api.getRecoveryCheckpoint(task.id)
+      .then((value) => {
+        setCheckpoint(value)
+
+        if (!value) return
+        if (value.mode.type === "mask") {
+          setActiveTab("mask")
+          setMaskPattern(value.mode.mask)
+        } else if (value.mode.type === "brute_force") {
+          setActiveTab("bruteforce")
+          setUseCustomCharset(true)
+          setCustomCharset(value.mode.charset)
+          setMinLength(value.mode.min_length)
+          setMaxLength(value.mode.max_length)
+        }
+      })
+      .catch(() => {
+        setCheckpoint(null)
+      })
+  }, [isRunning, task.id])
 
   // 构建字符集
   const buildCharset = useCallback(() => {
@@ -207,6 +232,17 @@ export default function RecoveryPanel({
     }
   }
 
+  const handleResume = async () => {
+    setError(null)
+    try {
+      await api.resumeRecovery(task.id)
+      setIsRunning(true)
+      onTaskStatusChange?.()
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
   // 复制密码
   const handleCopy = async (password: string) => {
     try {
@@ -291,6 +327,7 @@ export default function RecoveryPanel({
       task.status === "exhausted" ||
       task.status === "interrupted"
     )
+  const canResume = canStart && checkpoint !== null
 
   return (
     <section className="space-y-4">
@@ -302,6 +339,24 @@ export default function RecoveryPanel({
       <p className="text-sm text-muted-foreground">
         {t("recovery_description")}
       </p>
+
+      {canResume && checkpoint && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-blue-900">
+            <div className="font-medium">{t("recovery_resume_available")}</div>
+            <div className="text-blue-700">
+              {t("tried_count")}: {checkpoint.tried.toLocaleString()} / {checkpoint.total.toLocaleString()}
+            </div>
+          </div>
+          <button
+            onClick={() => void handleResume()}
+            className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            <Play className="h-4 w-4" />
+            {t("resume_recovery")}
+          </button>
+        </div>
+      )}
 
       {/* 结果展示 - 如果找到密码 */}
       {terminalStatus === "found" && displayPassword && (
