@@ -19,3 +19,10 @@ export function formatDateTime(isoString: string): string {
 export function getFileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath
 }
+
+export function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const min = Math.floor(seconds / 60)
+  const sec = seconds % 60
+  return `${min}m ${sec.toFixed(0)}s`
+}

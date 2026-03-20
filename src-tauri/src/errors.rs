@@ -21,6 +21,7 @@ pub enum AppError {
     SerializationError(#[from] serde_json::Error),
 
     #[error("操作未授权")]
+    #[allow(dead_code)]
     Unauthorized,
 }
 

@@ -22,6 +22,8 @@ const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   processing: "bg-indigo-100 text-indigo-800",
   verifying: "bg-yellow-100 text-yellow-800",
   succeeded: "bg-green-100 text-green-800",
+  exhausted: "bg-amber-100 text-amber-800",
+  cancelled: "bg-gray-200 text-gray-800",
   failed: "bg-red-100 text-red-800",
   cleaned: "bg-gray-100 text-gray-800",
 }

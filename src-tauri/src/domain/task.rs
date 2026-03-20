@@ -21,6 +21,10 @@ pub enum TaskStatus {
     Verifying,
     /// 成功
     Succeeded,
+    /// 已穷尽候选密码
+    Exhausted,
+    /// 已取消
+    Cancelled,
     /// 失败
     Failed,
     /// 已清理
@@ -49,6 +53,8 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub error_message: Option<String>,
+    /// 恢复成功后找到的密码
+    pub found_password: Option<String>,
     /// 压缩包检测结果 (JSON 序列化存储)
     pub archive_info: Option<ArchiveInfo>,
 }

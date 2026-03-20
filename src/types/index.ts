@@ -12,11 +12,14 @@ export interface Task {
     | "processing"
     | "verifying"
     | "succeeded"
+    | "exhausted"
+    | "cancelled"
     | "failed"
     | "cleaned"
   created_at: string
   updated_at: string
   error_message: string | null
+  found_password: string | null
   archive_info: ArchiveInfo | null
 }
 
@@ -37,7 +40,30 @@ export interface ArchiveInfo {
   entries: ArchiveEntry[]
 }
 
-// --- 密码恢复相关类型 ---
+// --- Audit event types ---
+
+export type AuditEventType =
+  | "file_imported"
+  | "task_created"
+  | "task_deleted"
+  | "tasks_cleared"
+  | "task_started"
+  | "task_completed"
+  | "task_failed"
+  | "audit_logs_cleared"
+  | "authorization_granted"
+  | "result_exported"
+  | "cache_cleared"
+
+export interface AuditEvent {
+  id: string
+  event_type: AuditEventType
+  task_id: string | null
+  description: string
+  timestamp: string
+}
+
+// --- Password recovery types ---
 
 export type RecoveryStatus =
   | "running"

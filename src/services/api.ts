@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { Task, ArchiveInfo, RecoveryProgress } from "@/types"
+import type { Task, ArchiveInfo, RecoveryProgress, AuditEvent } from "@/types"
 
 export async function getTasks(): Promise<Task[]> {
   return invoke<Task[]>("get_tasks")
@@ -61,11 +61,39 @@ export async function cancelRecovery(taskId: string): Promise<void> {
   return invoke<void>("cancel_recovery", { taskId })
 }
 
-/// 监听恢复进度事件
+// --- Audit events ---
+
+export async function getAuditEvents(limit?: number): Promise<AuditEvent[]> {
+  return invoke<AuditEvent[]>("get_audit_events", { limit: limit ?? null })
+}
+
+export async function getTaskAuditEvents(taskId: string): Promise<AuditEvent[]> {
+  return invoke<AuditEvent[]>("get_task_audit_events", { taskId })
+}
+
+// --- Recovery progress listener ---
 export function onRecoveryProgress(
   callback: (progress: RecoveryProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<RecoveryProgress>("recovery-progress", (event) => {
     callback(event.payload)
   })
+}
+
+// --- Settings ---
+
+export async function getAppDataDir(): Promise<string> {
+  return invoke<string>("get_app_data_dir")
+}
+
+export async function clearAllTasks(): Promise<number> {
+  return invoke<number>("clear_all_tasks")
+}
+
+export async function clearAuditEvents(): Promise<number> {
+  return invoke<number>("clear_audit_events")
+}
+
+export async function getStats(): Promise<[number, number]> {
+  return invoke<[number, number]>("get_stats")
 }

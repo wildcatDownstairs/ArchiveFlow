@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -21,5 +22,12 @@ export default defineConfig({
   // produce sourcemaps for debug builds
   build: {
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    css: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 })

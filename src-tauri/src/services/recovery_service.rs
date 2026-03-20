@@ -36,6 +36,7 @@ pub fn try_password_on_archive<R: Read + Seek>(
 
 /// 独立版本：尝试用给定密码打开 ZIP 文件中的第一个加密条目。
 /// 每次调用都会重新打开文件（适合单次测试，不适合热路径）。
+#[allow(dead_code)]
 pub fn try_password_zip(file_path: &Path, password: &str) -> bool {
     let file = match std::fs::File::open(file_path) {
         Ok(f) => f,
@@ -371,4 +372,152 @@ pub fn run_recovery(
     );
 
     Ok(RecoveryResult::Exhausted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixtures_dir() -> std::path::PathBuf {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.parent().unwrap().join("fixtures").join("zip")
+    }
+
+    // ─── BruteForceIterator ─────────────────────────────────────────
+
+    #[test]
+    fn bruteforce_abc_1_2_produces_12_items() {
+        let items: Vec<String> = BruteForceIterator::new("abc", 1, 2).collect();
+        assert_eq!(
+            items,
+            vec!["a", "b", "c", "aa", "ab", "ac", "ba", "bb", "bc", "ca", "cb", "cc"]
+        );
+        assert_eq!(items.len(), 12);
+    }
+
+    #[test]
+    fn bruteforce_ab_1_1_produces_a_b() {
+        let items: Vec<String> = BruteForceIterator::new("ab", 1, 1).collect();
+        assert_eq!(items, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn bruteforce_empty_charset_produces_nothing() {
+        let items: Vec<String> = BruteForceIterator::new("", 1, 3).collect();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn bruteforce_min_len_zero_treated_as_one() {
+        let items: Vec<String> = BruteForceIterator::new("a", 0, 2).collect();
+        assert_eq!(items, vec!["a", "aa"]);
+    }
+
+    #[test]
+    fn bruteforce_max_less_than_min_clamped() {
+        // max < min → clamped to min, so we get all 3-char combos of "ab"
+        let items: Vec<String> = BruteForceIterator::new("ab", 3, 1).collect();
+        assert_eq!(items.len(), 8); // 2^3 = 8
+        assert_eq!(items[0], "aaa");
+        assert_eq!(items[7], "bbb");
+    }
+
+    // ─── total_combinations ─────────────────────────────────────────
+
+    #[test]
+    fn total_combinations_2_1_2() {
+        assert_eq!(BruteForceIterator::total_combinations(2, 1, 2), 6); // 2 + 4
+    }
+
+    #[test]
+    fn total_combinations_26_1_3() {
+        // 26 + 676 + 17576 = 18278
+        assert_eq!(BruteForceIterator::total_combinations(26, 1, 3), 18278);
+    }
+
+    #[test]
+    fn total_combinations_zero_charset() {
+        assert_eq!(BruteForceIterator::total_combinations(0, 1, 3), 0);
+    }
+
+    #[test]
+    fn total_combinations_min_zero_treated_as_one() {
+        // min 0 → 1, so same as (2, 1, 2) = 6
+        assert_eq!(BruteForceIterator::total_combinations(2, 0, 2), 6);
+    }
+
+    // ─── try_password_zip ───────────────────────────────────────────
+
+    #[test]
+    fn try_password_zip_correct_on_aes() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        assert!(try_password_zip(&path, "test123"));
+    }
+
+    #[test]
+    fn try_password_zip_wrong_on_aes() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        assert!(!try_password_zip(&path, "wrong"));
+    }
+
+    #[test]
+    fn try_password_zip_correct_on_strong() {
+        let path = fixtures_dir().join("encrypted-strong.zip");
+        assert!(try_password_zip(&path, "Str0ng!P@ss"));
+    }
+
+    #[test]
+    fn try_password_zip_on_unencrypted_returns_false() {
+        let path = fixtures_dir().join("normal.zip");
+        assert!(!try_password_zip(&path, "anything"));
+    }
+
+    #[test]
+    fn try_password_zip_nonexistent_file_returns_false() {
+        let path = fixtures_dir().join("does-not-exist.zip");
+        assert!(!try_password_zip(&path, "test"));
+    }
+
+    // ─── try_password_on_archive ────────────────────────────────────
+
+    #[test]
+    fn try_password_on_archive_correct() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        let file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+
+        // Find the first encrypted entry index
+        let index = (0..archive.len())
+            .find(|&i| {
+                archive
+                    .by_index_raw(i)
+                    .map(|e| e.encrypted() && !e.is_dir())
+                    .unwrap_or(false)
+            })
+            .expect("should have encrypted entry");
+
+        assert!(try_password_on_archive(&mut archive, index, "test123"));
+    }
+
+    #[test]
+    fn try_password_on_archive_wrong() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        let file = std::fs::File::open(&path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+
+        let index = (0..archive.len())
+            .find(|&i| {
+                archive
+                    .by_index_raw(i)
+                    .map(|e| e.encrypted() && !e.is_dir())
+                    .unwrap_or(false)
+            })
+            .expect("should have encrypted entry");
+
+        assert!(!try_password_on_archive(
+            &mut archive,
+            index,
+            "wrong_password"
+        ));
+    }
 }

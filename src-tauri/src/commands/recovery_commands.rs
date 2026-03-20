@@ -4,6 +4,8 @@ use crate::db::Database;
 use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryManager};
 use crate::errors::AppError;
 use crate::services::recovery_service::{self, RecoveryResult};
+use crate::services::audit_service;
+use crate::domain::audit::AuditEventType;
 
 /// 启动密码恢复任务
 ///
@@ -87,22 +89,25 @@ pub async fn start_recovery(
         mode: attack_mode,
     };
 
-    // 3. 检查是否已有运行中的恢复任务
-    if recovery_manager.is_running(&task_id) {
-        return Err(AppError::InvalidArgument(format!(
-            "该任务已有运行中的恢复: {}",
-            task_id
-        )));
-    }
+    // 3. 原子注册恢复任务，避免重复启动竞态
+    let cancel_flag = recovery_manager
+        .try_register(&task_id)
+        .map_err(|_| AppError::InvalidArgument(format!("该任务已有运行中的恢复: {}", task_id)))?;
 
-    // 4. 注册取消标志
-    let cancel_flag = recovery_manager.register(&task_id);
+    // 4. 更新任务状态为 processing，并清理上一次恢复结果
+    db.update_task_recovery_result(&task_id, "processing", None, None)?;
 
-    // 5. 更新任务状态为 processing
-    db.update_task_status(&task_id, "processing", None)?;
+    // 记录恢复任务启动审计事件
+    let _ = audit_service::log_audit_event(
+        &db,
+        AuditEventType::TaskStarted,
+        Some(task_id.clone()),
+        format!("启动密码恢复: {} (模式: {})", task_id, mode),
+    );
+
     log::info!("恢复任务已启动: {} (模式: {})", task_id, mode);
 
-    // 6. 在后台线程中运行恢复
+    // 5. 在后台线程中运行恢复
     let task_id_clone = task_id.clone();
     let app_handle_clone = app_handle.clone();
 
@@ -121,39 +126,71 @@ pub async fn start_recovery(
 
         match result {
             Ok(RecoveryResult::Found(password)) => {
-                // 找到密码 → succeeded，密码存入 error_message 字段（后续可加专用列）
+                // 找到密码 → succeeded，密码持久化到专用字段
                 log::info!("恢复成功: {} 密码={}", task_id_clone, password);
-                let _ = db.update_task_status(
+                let _ = db.update_task_recovery_result(
                     &task_id_clone,
                     "succeeded",
-                    Some(&format!("密码: {}", password)),
+                    None,
+                    Some(&password),
+                );
+                // 记录密码恢复成功审计事件
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::TaskCompleted,
+                    Some(task_id_clone.clone()),
+                    format!("密码恢复成功: {}", task_id_clone),
                 );
             }
             Ok(RecoveryResult::Exhausted) => {
-                // 穷尽所有密码 → failed
+                // 穷尽所有密码 → exhausted
                 log::info!("恢复已穷尽: {}", task_id_clone);
-                let _ = db.update_task_status(
+                let _ = db.update_task_recovery_result(
                     &task_id_clone,
-                    "failed",
-                    Some("已穷尽所有候选密码，未找到匹配密码"),
+                    "exhausted",
+                    None,
+                    None,
+                );
+                // 记录密码穷尽审计事件
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::TaskFailed,
+                    Some(task_id_clone.clone()),
+                    format!("密码穷尽未找到: {}", task_id_clone),
                 );
             }
             Ok(RecoveryResult::Cancelled) => {
-                // 用户取消 → failed（取消信息）
+                // 用户取消 → cancelled
                 log::info!("恢复已取消: {}", task_id_clone);
-                let _ = db.update_task_status(
+                let _ = db.update_task_recovery_result(
                     &task_id_clone,
-                    "failed",
-                    Some("用户已取消恢复任务"),
+                    "cancelled",
+                    None,
+                    None,
+                );
+                // 记录用户取消恢复审计事件
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::TaskFailed,
+                    Some(task_id_clone.clone()),
+                    format!("用户取消恢复: {}", task_id_clone),
                 );
             }
             Err(err) => {
                 // 发生错误 → failed
                 log::error!("恢复出错: {} - {}", task_id_clone, err);
-                let _ = db.update_task_status(
+                let _ = db.update_task_recovery_result(
                     &task_id_clone,
                     "failed",
                     Some(&format!("恢复出错: {}", err)),
+                    None,
+                );
+                // 记录恢复出错审计事件
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::TaskFailed,
+                    Some(task_id_clone.clone()),
+                    format!("恢复出错: {} - {}", task_id_clone, err),
                 );
             }
         }

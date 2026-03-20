@@ -7,9 +7,12 @@ use serde::{Deserialize, Serialize};
 pub enum AuditEventType {
     FileImported,
     TaskCreated,
+    TaskDeleted,
+    TasksCleared,
     TaskStarted,
     TaskCompleted,
     TaskFailed,
+    AuditLogsCleared,
     AuthorizationGranted,
     ResultExported,
     CacheCleared,

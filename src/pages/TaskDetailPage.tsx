@@ -17,8 +17,9 @@ import {
 import { cn } from "@/lib/utils"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatFileSize, formatDateTime } from "@/lib/format"
+import { buildFileTree, type TreeNode } from "@/lib/fileTree"
 import RecoveryPanel from "@/components/RecoveryPanel"
-import type { Task, ArchiveEntry } from "@/types"
+import type { Task } from "@/types"
 
 const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   imported: "bg-blue-100 text-blue-800",
@@ -28,6 +29,8 @@ const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   processing: "bg-indigo-100 text-indigo-800",
   verifying: "bg-yellow-100 text-yellow-800",
   succeeded: "bg-green-100 text-green-800",
+  exhausted: "bg-amber-100 text-amber-800",
+  cancelled: "bg-gray-200 text-gray-800",
   failed: "bg-red-100 text-red-800",
   cleaned: "bg-gray-100 text-gray-800",
 }
@@ -37,61 +40,6 @@ const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
   sevenz: "bg-green-100 text-green-800",
   rar: "bg-orange-100 text-orange-800",
   unknown: "bg-gray-100 text-gray-800",
-}
-
-/// 将扁平的文件条目列表构建成树结构
-interface TreeNode {
-  name: string
-  path: string
-  entry?: ArchiveEntry
-  children: TreeNode[]
-  isDirectory: boolean
-}
-
-function buildFileTree(entries: ArchiveEntry[]): TreeNode[] {
-  const root: TreeNode[] = []
-
-  for (const entry of entries) {
-    const parts = entry.path.split("/").filter(Boolean)
-    let currentLevel = root
-
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
-      const isLast = i === parts.length - 1
-      const existing = currentLevel.find((n) => n.name === part)
-
-      if (existing) {
-        if (isLast && !entry.is_directory) {
-          existing.entry = entry
-        }
-        currentLevel = existing.children
-      } else {
-        const node: TreeNode = {
-          name: part,
-          path: parts.slice(0, i + 1).join("/"),
-          entry: isLast ? entry : undefined,
-          children: [],
-          isDirectory: isLast ? entry.is_directory : true,
-        }
-        currentLevel.push(node)
-        currentLevel = node.children
-      }
-    }
-  }
-
-  // 排序：目录在前，文件在后，同类按名称
-  const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => {
-      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
-    for (const node of nodes) {
-      sortNodes(node.children)
-    }
-  }
-  sortNodes(root)
-
-  return root
 }
 
 function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string }) {

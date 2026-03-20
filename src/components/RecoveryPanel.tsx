@@ -11,6 +11,7 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { formatElapsed } from "@/lib/format"
 import * as api from "@/services/api"
 import type { RecoveryProgress, RecoveryStatus, Task } from "@/types"
 
@@ -172,19 +173,28 @@ export default function RecoveryPanel({
     }
   }
 
-  // 格式化时间
-  const formatElapsed = (seconds: number) => {
-    if (seconds < 60) return `${seconds.toFixed(1)}${t("seconds")}`
-    const min = Math.floor(seconds / 60)
-    const sec = seconds % 60
-    return `${min}m ${sec.toFixed(0)}s`
-  }
-
   // 进度百分比
   const progressPercent =
     progress && progress.total > 0
       ? Math.min((progress.tried / progress.total) * 100, 100)
       : 0
+
+  const terminalStatus: Exclude<RecoveryStatus, "running"> | null =
+    progress && progress.status !== "running"
+      ? progress.status
+      : task.status === "succeeded"
+        ? "found"
+        : task.status === "exhausted"
+          ? "exhausted"
+          : task.status === "cancelled"
+            ? "cancelled"
+            : task.status === "failed"
+              ? "error"
+              : null
+
+  const displayPassword =
+    progress?.status === "found" ? progress.found_password : task.found_password
+  const terminalErrorMessage = terminalStatus === "error" ? task.error_message : null
 
   // 状态显示
   const statusDisplay: Record<
@@ -212,7 +222,12 @@ export default function RecoveryPanel({
   // 只有加密且状态允许时才显示
   const canStart =
     !isRunning &&
-    (task.status === "ready" || task.status === "failed")
+    (
+      task.status === "ready" ||
+      task.status === "failed" ||
+      task.status === "cancelled" ||
+      task.status === "exhausted"
+    )
 
   return (
     <section className="space-y-4">
@@ -226,7 +241,7 @@ export default function RecoveryPanel({
       </p>
 
       {/* 结果展示 - 如果找到密码 */}
-      {progress?.status === "found" && progress.found_password && (
+      {terminalStatus === "found" && displayPassword && (
         <div className="rounded-lg border-2 border-green-300 bg-green-50 p-4 space-y-2">
           <div className="flex items-center gap-2 text-green-700 font-medium">
             <Check className="h-5 w-5" />
@@ -234,10 +249,10 @@ export default function RecoveryPanel({
           </div>
           <div className="flex items-center gap-3">
             <code className="flex-1 rounded bg-white px-3 py-2 text-lg font-mono border border-green-200">
-              {progress.found_password}
+              {displayPassword}
             </code>
             <button
-              onClick={() => void handleCopy(progress.found_password!)}
+              onClick={() => void handleCopy(displayPassword)}
               className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm bg-green-600 text-white hover:bg-green-700 transition-colors"
             >
               {copied ? (
@@ -248,40 +263,50 @@ export default function RecoveryPanel({
               {copied ? t("copied") : t("copy_password")}
             </button>
           </div>
-          <div className="text-xs text-green-600">
-            {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
-            {t("elapsed_time")}: {formatElapsed(progress.elapsed_seconds)}
-          </div>
+          {progress?.status === "found" && (
+            <div className="text-xs text-green-600">
+              {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
+              {t("elapsed_time")}: {formatElapsed(progress.elapsed_seconds)}
+            </div>
+          )}
         </div>
       )}
 
       {/* 结果展示 - 终态（非 found） */}
-      {progress &&
-        progress.status !== "running" &&
-        progress.status !== "found" && (
+      {terminalStatus &&
+        terminalStatus !== "found" && (
           <div
             className={cn(
               "rounded-lg border p-4 flex items-center gap-3",
-              progress.status === "exhausted" &&
+              terminalStatus === "exhausted" &&
                 "border-yellow-200 bg-yellow-50",
-              progress.status === "cancelled" && "border-gray-200 bg-gray-50",
-              progress.status === "error" && "border-red-200 bg-red-50",
+              terminalStatus === "cancelled" && "border-gray-200 bg-gray-50",
+              terminalStatus === "error" && "border-red-200 bg-red-50",
             )}
           >
             {(() => {
-              const info = statusDisplay[progress.status]
+              const info = statusDisplay[terminalStatus]
               const Icon = info.icon
               return (
                 <>
                   <Icon className={cn("h-5 w-5", info.color)} />
-                  <span className={cn("font-medium", info.color)}>
-                    {info.label}
-                  </span>
-                  <span className="text-sm text-muted-foreground ml-auto">
-                    {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
-                    {t("elapsed_time")}:{" "}
-                    {formatElapsed(progress.elapsed_seconds)}
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    <span className={cn("font-medium", info.color)}>
+                      {info.label}
+                    </span>
+                    {terminalErrorMessage && (
+                      <span className="text-sm text-muted-foreground">
+                        {terminalErrorMessage}
+                      </span>
+                    )}
+                  </div>
+                  {progress && progress.status !== "running" && (
+                    <span className="text-sm text-muted-foreground ml-auto">
+                      {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
+                      {t("elapsed_time")}:{" "}
+                      {formatElapsed(progress.elapsed_seconds)}
+                    </span>
+                  )}
                 </>
               )
             })()}

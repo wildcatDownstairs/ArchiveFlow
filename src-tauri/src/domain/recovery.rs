@@ -70,12 +70,17 @@ impl RecoveryManager {
         }
     }
 
-    /// 为指定任务注册一个取消标志，返回 Arc<AtomicBool> 供恢复线程使用
-    pub fn register(&self, task_id: &str) -> Arc<AtomicBool> {
-        let flag = Arc::new(AtomicBool::new(false));
+    /// 原子地为指定任务注册取消标志。
+    /// 如果任务已在运行，返回 Err(())
+    pub fn try_register(&self, task_id: &str) -> Result<Arc<AtomicBool>, ()> {
         let mut flags = self.cancel_flags.lock().unwrap();
+        if flags.contains_key(task_id) {
+            return Err(());
+        }
+
+        let flag = Arc::new(AtomicBool::new(false));
         flags.insert(task_id.to_string(), Arc::clone(&flag));
-        flag
+        Ok(flag)
     }
 
     /// 设置指定任务的取消标志
@@ -95,9 +100,97 @@ impl RecoveryManager {
         flags.contains_key(task_id)
     }
 
+    /// 是否存在任意运行中的恢复任务
+    pub fn has_running_tasks(&self) -> bool {
+        let flags = self.cancel_flags.lock().unwrap();
+        !flags.is_empty()
+    }
+
     /// 移除指定任务的取消标志（任务完成后清理）
     pub fn remove(&self, task_id: &str) {
         let mut flags = self.cancel_flags.lock().unwrap();
         flags.remove(task_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecoveryManager;
+
+    #[test]
+    fn try_register_is_atomic_per_task() {
+        let manager = RecoveryManager::new();
+
+        let first = manager.try_register("task-1");
+        let second = manager.try_register("task-1");
+
+        assert!(first.is_ok());
+        assert!(second.is_err());
+        assert!(manager.is_running("task-1"));
+    }
+
+    #[test]
+    fn remove_allows_reregister() {
+        let manager = RecoveryManager::new();
+
+        assert!(manager.try_register("task-1").is_ok());
+        manager.remove("task-1");
+
+        assert!(manager.try_register("task-1").is_ok());
+    }
+
+    #[test]
+    fn cancel_sets_flag() {
+        let manager = RecoveryManager::new();
+        let flag = manager.try_register("task-1").unwrap();
+        assert!(!flag.load(std::sync::atomic::Ordering::Relaxed));
+
+        let cancelled = manager.cancel("task-1");
+        assert!(cancelled);
+        assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn cancel_nonexistent_returns_false() {
+        let manager = RecoveryManager::new();
+        assert!(!manager.cancel("nonexistent"));
+    }
+
+    #[test]
+    fn is_running_lifecycle() {
+        let manager = RecoveryManager::new();
+        assert!(!manager.is_running("task-1"));
+
+        manager.try_register("task-1").unwrap();
+        assert!(manager.is_running("task-1"));
+
+        manager.remove("task-1");
+        assert!(!manager.is_running("task-1"));
+    }
+
+    #[test]
+    fn has_running_tasks_lifecycle() {
+        let manager = RecoveryManager::new();
+        assert!(!manager.has_running_tasks());
+
+        manager.try_register("task-1").unwrap();
+        assert!(manager.has_running_tasks());
+
+        manager.remove("task-1");
+        assert!(!manager.has_running_tasks());
+    }
+
+    #[test]
+    fn multiple_tasks_independent() {
+        let manager = RecoveryManager::new();
+        let _flag1 = manager.try_register("task-1").unwrap();
+        let flag2 = manager.try_register("task-2").unwrap();
+
+        // Cancel only task-1
+        manager.cancel("task-1");
+
+        // task-2's flag should NOT be affected
+        assert!(!flag2.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(manager.is_running("task-2"));
     }
 }

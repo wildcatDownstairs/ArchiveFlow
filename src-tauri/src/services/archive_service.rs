@@ -79,42 +79,134 @@ pub fn inspect_zip(file_path: &Path) -> Result<ArchiveInfo, String> {
     })
 }
 
-pub fn inspect_archive(file_path: &Path) -> Result<(ArchiveType, ArchiveInfo), String> {
+pub fn inspect_archive(file_path: &Path) -> Result<(ArchiveType, Option<ArchiveInfo>), String> {
     let archive_type = detect_archive_type(file_path)?;
 
     match archive_type {
         ArchiveType::Zip => {
             let info = inspect_zip(file_path)?;
-            Ok((ArchiveType::Zip, info))
+            Ok((ArchiveType::Zip, Some(info)))
         }
-        ArchiveType::SevenZ => {
-            let metadata =
-                std::fs::metadata(file_path).map_err(|e| format!("读取文件信息失败: {}", e))?;
-            Ok((
-                ArchiveType::SevenZ,
-                ArchiveInfo {
-                    total_entries: 0,
-                    total_size: metadata.len(),
-                    is_encrypted: false,
-                    has_encrypted_filenames: false,
-                    entries: vec![],
-                },
-            ))
-        }
-        ArchiveType::Rar => {
-            let metadata =
-                std::fs::metadata(file_path).map_err(|e| format!("读取文件信息失败: {}", e))?;
-            Ok((
-                ArchiveType::Rar,
-                ArchiveInfo {
-                    total_entries: 0,
-                    total_size: metadata.len(),
-                    is_encrypted: false,
-                    has_encrypted_filenames: false,
-                    entries: vec![],
-                },
-            ))
-        }
+        ArchiveType::SevenZ => Ok((ArchiveType::SevenZ, None)),
+        ArchiveType::Rar => Ok((ArchiveType::Rar, None)),
         ArchiveType::Unknown => Err("无法识别的文件格式".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fixtures_dir() -> std::path::PathBuf {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.parent().unwrap().join("fixtures").join("zip")
+    }
+
+    // ─── detect_archive_type ────────────────────────────────────────
+
+    #[test]
+    fn detect_normal_zip() {
+        let path = fixtures_dir().join("normal.zip");
+        assert_eq!(detect_archive_type(&path).unwrap(), ArchiveType::Zip);
+    }
+
+    #[test]
+    fn detect_encrypted_aes_zip() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        assert_eq!(detect_archive_type(&path).unwrap(), ArchiveType::Zip);
+    }
+
+    #[test]
+    fn detect_7z_magic_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.7z");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0x00, 0x00])
+            .unwrap();
+        assert_eq!(detect_archive_type(&path).unwrap(), ArchiveType::SevenZ);
+    }
+
+    #[test]
+    fn detect_rar_magic_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.rar");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00, 0x00])
+            .unwrap();
+        assert_eq!(detect_archive_type(&path).unwrap(), ArchiveType::Rar);
+    }
+
+    #[test]
+    fn detect_random_bytes_is_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+            .unwrap();
+        assert_eq!(detect_archive_type(&path).unwrap(), ArchiveType::Unknown);
+    }
+
+    #[test]
+    fn detect_nonexistent_file_is_err() {
+        let path = std::path::Path::new("/nonexistent/file.zip");
+        assert!(detect_archive_type(path).is_err());
+    }
+
+    // ─── inspect_zip ────────────────────────────────────────────────
+
+    #[test]
+    fn inspect_normal_zip_not_encrypted() {
+        let path = fixtures_dir().join("normal.zip");
+        let info = inspect_zip(&path).unwrap();
+        assert!(!info.is_encrypted);
+        assert!(info.total_entries > 0);
+    }
+
+    #[test]
+    fn inspect_encrypted_aes_zip_is_encrypted() {
+        let path = fixtures_dir().join("encrypted-aes.zip");
+        let info = inspect_zip(&path).unwrap();
+        assert!(info.is_encrypted);
+    }
+
+    #[test]
+    fn inspect_empty_zip() {
+        let path = fixtures_dir().join("empty.zip");
+        let info = inspect_zip(&path).unwrap();
+        assert_eq!(info.total_entries, 0);
+        assert_eq!(info.total_size, 0);
+    }
+
+    // ─── inspect_archive ────────────────────────────────────────────
+
+    #[test]
+    fn inspect_archive_normal_zip() {
+        let path = fixtures_dir().join("normal.zip");
+        let (archive_type, info) = inspect_archive(&path).unwrap();
+        assert_eq!(archive_type, ArchiveType::Zip);
+        assert!(info.is_some());
+    }
+
+    #[test]
+    fn inspect_archive_7z_returns_none_info() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.7z");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0x00, 0x00])
+            .unwrap();
+        let (archive_type, info) = inspect_archive(&path).unwrap();
+        assert_eq!(archive_type, ArchiveType::SevenZ);
+        assert!(info.is_none());
+    }
+
+    #[test]
+    fn inspect_archive_random_bytes_is_err() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(&[0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+            .unwrap();
+        assert!(inspect_archive(&path).is_err());
     }
 }
