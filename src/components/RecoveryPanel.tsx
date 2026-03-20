@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import {
   Play,
   Square,
+  Pause,
   KeyRound,
   Copy,
   Check,
@@ -18,7 +19,14 @@ import { formatElapsed } from "@/lib/format"
 import { buildDictionaryCandidates } from "@/lib/recoveryCandidates"
 import { useAppStore } from "@/stores/appStore"
 import * as api from "@/services/api"
-import type { RecoveryCheckpoint, RecoveryProgress, RecoveryStatus, Task } from "@/types"
+import type {
+  RecoveryCheckpoint,
+  RecoveryProgress,
+  RecoverySchedulerSnapshot,
+  RecoveryStatus,
+  ScheduledRecovery,
+  Task,
+} from "@/types"
 
 // 预定义字符集
 const CHARSETS = {
@@ -67,14 +75,32 @@ export default function RecoveryPanel({
   // 恢复状态
   const [progress, setProgress] = useState<RecoveryProgress | null>(null)
   const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null)
+  const [scheduledRecovery, setScheduledRecovery] = useState<ScheduledRecovery | null>(null)
+  const [schedulerSnapshot, setSchedulerSnapshot] = useState<RecoverySchedulerSnapshot | null>(null)
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
+  const [priority, setPriority] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   // unlisten ref
   const unlistenRef = useRef<(() => void) | null>(null)
+
+  const refreshSchedulerState = useCallback(async () => {
+    try {
+      const [scheduled, snapshot] = await Promise.all([
+        api.getScheduledRecovery(task.id),
+        api.getRecoverySchedulerSnapshot(),
+      ])
+      setScheduledRecovery(scheduled)
+      setSchedulerSnapshot(snapshot)
+      setIsRunning(scheduled?.state === "running" || task.status === "processing")
+    } catch {
+      setScheduledRecovery(null)
+      setSchedulerSnapshot(null)
+    }
+  }, [task.id, task.status])
 
   // 监听恢复进度
   useEffect(() => {
@@ -89,6 +115,7 @@ export default function RecoveryPanel({
       // 终态处理
       if (p.status !== "running") {
         setIsRunning(false)
+        void refreshSchedulerState()
         onTaskStatusChange?.()
       }
     }).then((unlisten) => {
@@ -104,14 +131,39 @@ export default function RecoveryPanel({
       unlistenRef.current?.()
       unlistenRef.current = null
     }
-  }, [isRunning, task.id, onTaskStatusChange])
+  }, [isRunning, task.id, onTaskStatusChange, refreshSchedulerState])
+
+  useEffect(() => {
+    void api
+      .getRecoverySchedulerSnapshot()
+      .then((snapshot) => {
+        setSchedulerSnapshot(snapshot)
+        if (snapshot.max_concurrent === recoveryPreferences.maxConcurrentRecoveries) {
+          return snapshot
+        }
+        return api.setRecoverySchedulerLimit(recoveryPreferences.maxConcurrentRecoveries)
+      })
+      .then((snapshot) => {
+        if (snapshot) {
+          setSchedulerSnapshot(snapshot)
+        }
+      })
+      .catch(() => {})
+  }, [recoveryPreferences.maxConcurrentRecoveries])
 
   useEffect(() => {
     if (isRunning) return
 
-    api.getRecoveryCheckpoint(task.id)
-      .then((value) => {
+    void Promise.all([
+      api.getRecoveryCheckpoint(task.id),
+      api.getScheduledRecovery(task.id),
+      api.getRecoverySchedulerSnapshot(),
+    ])
+      .then(([value, scheduled, snapshot]) => {
         setCheckpoint(value)
+        setScheduledRecovery(scheduled)
+        setSchedulerSnapshot(snapshot)
+        setPriority(scheduled?.priority ?? 0)
 
         if (!value) return
         if (value.mode.type === "mask") {
@@ -127,6 +179,8 @@ export default function RecoveryPanel({
       })
       .catch(() => {
         setCheckpoint(null)
+        setScheduledRecovery(null)
+        setSchedulerSnapshot(null)
       })
   }, [isRunning, task.id])
 
@@ -180,6 +234,7 @@ export default function RecoveryPanel({
           task.id,
           "dictionary",
           JSON.stringify({ wordlist: candidates }),
+          priority,
         )
         if (recoveryPreferences.autoClearDictionaryInput) {
           setWordlistText("")
@@ -202,6 +257,7 @@ export default function RecoveryPanel({
             min_length: minLength,
             max_length: maxLength,
           }),
+          priority,
         )
       } else {
         if (!maskPattern.trim()) {
@@ -214,9 +270,10 @@ export default function RecoveryPanel({
           JSON.stringify({
             mask: maskPattern.trim(),
           }),
+          priority,
         )
       }
-      setIsRunning(true)
+      await refreshSchedulerState()
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -227,6 +284,19 @@ export default function RecoveryPanel({
   const handleCancel = async () => {
     try {
       await api.cancelRecovery(task.id)
+      setIsRunning(false)
+      await refreshSchedulerState()
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const handlePause = async () => {
+    try {
+      await api.pauseRecovery(task.id)
+      setIsRunning(false)
+      await refreshSchedulerState()
+      onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
     }
@@ -236,7 +306,7 @@ export default function RecoveryPanel({
     setError(null)
     try {
       await api.resumeRecovery(task.id)
-      setIsRunning(true)
+      await refreshSchedulerState()
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -288,6 +358,11 @@ export default function RecoveryPanel({
     terminalStatus === "error" || terminalStatus === "interrupted"
       ? task.error_message
       : null
+  const queuePosition = scheduledRecovery?.state === "queued" && schedulerSnapshot
+    ? schedulerSnapshot.tasks
+      .filter((item) => item.state === "queued")
+      .findIndex((item) => item.task_id === task.id) + 1
+    : 0
 
   // 状态显示
   const statusDisplay: Record<
@@ -320,6 +395,7 @@ export default function RecoveryPanel({
   // 只有加密且状态允许时才显示
   const canStart =
     !isRunning &&
+    scheduledRecovery === null &&
     (
       task.status === "ready" ||
       task.status === "failed" ||
@@ -339,6 +415,60 @@ export default function RecoveryPanel({
       <p className="text-sm text-muted-foreground">
         {t("recovery_description")}
       </p>
+
+      {scheduledRecovery && (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1 text-sm">
+              <div className="font-medium text-indigo-900">
+                {t(`scheduler_${scheduledRecovery.state}`)}
+              </div>
+              <div className="text-indigo-700">
+                {t("scheduler_priority")}: {scheduledRecovery.priority}
+              </div>
+              {scheduledRecovery.state === "queued" && queuePosition > 0 && (
+                <div className="text-indigo-700">
+                  {t("queue_position")}: {queuePosition}
+                </div>
+              )}
+              {schedulerSnapshot && (
+                <div className="text-indigo-700">
+                  {t("running_tasks")}: {schedulerSnapshot.running_count} ·{" "}
+                  {t("queued_tasks")}: {schedulerSnapshot.queued_count} ·{" "}
+                  {t("paused_tasks")}: {schedulerSnapshot.paused_count}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {scheduledRecovery.state !== "paused" && (
+                <button
+                  onClick={() => void handlePause()}
+                  className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+                >
+                  <Pause className="h-4 w-4" />
+                  {t("pause_recovery")}
+                </button>
+              )}
+              {scheduledRecovery.state === "paused" && (
+                <button
+                  onClick={() => void handleResume()}
+                  className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                >
+                  <Play className="h-4 w-4" />
+                  {t("resume_recovery")}
+                </button>
+              )}
+              <button
+                onClick={() => void handleCancel()}
+                className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
+              >
+                <Square className="h-4 w-4" />
+                {t("cancel_recovery")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {canResume && checkpoint && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -689,6 +819,16 @@ export default function RecoveryPanel({
                   />
                 </div>
               </div>
+
+              <div className="space-y-1">
+                <label className="text-sm font-medium">{t("scheduler_priority")}</label>
+                <input
+                  type="number"
+                  value={priority}
+                  onChange={(e) => setPriority(parseInt(e.target.value, 10) || 0)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
             </div>
           )}
 
@@ -707,6 +847,18 @@ export default function RecoveryPanel({
                   {t("mask_hint")}
                 </p>
               </div>
+            </div>
+          )}
+
+          {activeTab !== "bruteforce" && (
+            <div className="space-y-1">
+              <label className="text-sm font-medium">{t("scheduler_priority")}</label>
+              <input
+                type="number"
+                value={priority}
+                onChange={(e) => setPriority(parseInt(e.target.value, 10) || 0)}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           )}
 
@@ -730,7 +882,7 @@ export default function RecoveryPanel({
       )}
 
       {/* 取消按钮 - 运行中 */}
-      {isRunning && (
+      {isRunning && scheduledRecovery?.state !== "paused" && (
         <button
           onClick={() => void handleCancel()}
           className="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"

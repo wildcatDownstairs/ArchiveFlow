@@ -15,7 +15,7 @@ mod services;
 // use 语句把路径较长的类型引入当前作用域，方便后续直接使用短名称。
 use db::Database;
 use domain::audit::AuditEventType;
-use domain::recovery::RecoveryManager;
+use domain::recovery::{RecoveryManager, RecoveryScheduler};
 use services::audit_service;
 // tauri::Manager 是一个 trait，提供 .manage() / .path() 等方法。
 // 如果不 use 它，直接调用 app.manage() 会报"方法未找到"的编译错误——
@@ -90,6 +90,8 @@ pub fn run() {
 
             // 初始化恢复任务管理器（用于控制密码恢复的启动/取消）
             app.manage(RecoveryManager::new());
+            // 初始化恢复任务调度器（用于队列、并发上限、暂停/继续）
+            app.manage(RecoveryScheduler::new());
 
             log::info!("ArchiveFlow 启动成功");
             Ok(())
@@ -114,7 +116,11 @@ pub fn run() {
             commands::audit_commands::record_setting_change,
             commands::recovery_commands::start_recovery,
             commands::recovery_commands::get_recovery_checkpoint,
+            commands::recovery_commands::get_scheduled_recovery,
+            commands::recovery_commands::get_recovery_scheduler_snapshot,
+            commands::recovery_commands::set_recovery_scheduler_limit,
             commands::recovery_commands::resume_recovery,
+            commands::recovery_commands::pause_recovery,
             commands::recovery_commands::cancel_recovery,
             commands::export_commands::export_tasks,
         ])

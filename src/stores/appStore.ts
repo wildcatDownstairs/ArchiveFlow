@@ -19,6 +19,7 @@ export interface RecoveryPreferences {
   autoIncludeFilenamePatterns: boolean
   autoClearDictionaryInput: boolean
   resultRetentionPolicy: ResultRetentionPolicy
+  maxConcurrentRecoveries: number
 }
 
 const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
@@ -33,6 +34,7 @@ const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
   autoIncludeFilenamePatterns: false,
   autoClearDictionaryInput: false,
   resultRetentionPolicy: "plaintext",
+  maxConcurrentRecoveries: 1,
 }
 
 function getInitialLocale(): string {

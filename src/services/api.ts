@@ -7,6 +7,9 @@ import type {
   AuditEvent,
   ExportFormat,
   RecoveryCheckpoint,
+  RecoverySchedulerSnapshot,
+  ScheduledRecovery,
+  ScheduledRecoveryState,
 } from "@/types"
 
 export async function getTasks(): Promise<Task[]> {
@@ -59,8 +62,14 @@ export async function startRecovery(
   taskId: string,
   mode: "dictionary" | "bruteforce" | "mask",
   configJson: string,
-): Promise<void> {
-  return invoke<void>("start_recovery", { taskId, mode, configJson })
+  priority?: number,
+): Promise<ScheduledRecoveryState> {
+  return invoke<ScheduledRecoveryState>("start_recovery", {
+    taskId,
+    mode,
+    configJson,
+    priority: priority ?? null,
+  })
 }
 
 /// 取消密码恢复
@@ -74,8 +83,30 @@ export async function getRecoveryCheckpoint(
   return invoke<RecoveryCheckpoint | null>("get_recovery_checkpoint", { taskId })
 }
 
-export async function resumeRecovery(taskId: string): Promise<void> {
-  return invoke<void>("resume_recovery", { taskId })
+export async function resumeRecovery(taskId: string): Promise<ScheduledRecoveryState> {
+  return invoke<ScheduledRecoveryState>("resume_recovery", { taskId })
+}
+
+export async function getScheduledRecovery(
+  taskId: string,
+): Promise<ScheduledRecovery | null> {
+  return invoke<ScheduledRecovery | null>("get_scheduled_recovery", { taskId })
+}
+
+export async function getRecoverySchedulerSnapshot(): Promise<RecoverySchedulerSnapshot> {
+  return invoke<RecoverySchedulerSnapshot>("get_recovery_scheduler_snapshot")
+}
+
+export async function setRecoverySchedulerLimit(
+  maxConcurrent: number,
+): Promise<RecoverySchedulerSnapshot> {
+  return invoke<RecoverySchedulerSnapshot>("set_recovery_scheduler_limit", {
+    maxConcurrent,
+  })
+}
+
+export async function pauseRecovery(taskId: string): Promise<void> {
+  return invoke<void>("pause_recovery", { taskId })
 }
 
 // --- Audit events ---

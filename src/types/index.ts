@@ -47,7 +47,10 @@ export type AuditEventType =
   | "task_failed"
   | "task_unsupported"
   | "task_interrupted"
+  | "recovery_queued"
   | "recovery_started"
+  | "recovery_paused"
+  | "recovery_resumed"
   | "recovery_succeeded"
   | "recovery_exhausted"
   | "recovery_cancelled"
@@ -99,4 +102,23 @@ export interface RecoveryCheckpoint {
   tried: number
   total: number
   updated_at: string
+}
+
+export type ScheduledRecoveryState = "queued" | "running" | "paused"
+
+export interface ScheduledRecovery {
+  task_id: string
+  mode: AttackMode
+  priority: number
+  state: ScheduledRecoveryState
+  requested_at: string
+  started_at: string | null
+}
+
+export interface RecoverySchedulerSnapshot {
+  max_concurrent: number
+  running_count: number
+  queued_count: number
+  paused_count: number
+  tasks: ScheduledRecovery[]
 }

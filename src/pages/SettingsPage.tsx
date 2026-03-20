@@ -20,6 +20,7 @@ import {
   clearAuditEvents,
   getStats,
   recordSettingChange,
+  setRecoverySchedulerLimit,
 } from "@/services/api"
 
 function stringifySetting(value: unknown): string {
@@ -135,6 +136,23 @@ export default function SettingsPage() {
       "recovery.resultRetentionPolicy",
       recoveryPreferences.resultRetentionPolicy,
       value,
+    )
+  }
+
+  const handleSchedulerLimitChange = async (value: number) => {
+    const normalized = Math.max(1, value)
+    if (recoveryPreferences.maxConcurrentRecoveries === normalized) return
+
+    updateRecoveryPreferences({ maxConcurrentRecoveries: normalized })
+    try {
+      await setRecoverySchedulerLimit(normalized)
+    } catch {
+      // Ignore runtime sync failures and keep the local preference.
+    }
+    await persistSettingChange(
+      "recovery.maxConcurrentRecoveries",
+      recoveryPreferences.maxConcurrentRecoveries,
+      normalized,
     )
   }
 
@@ -315,6 +333,20 @@ export default function SettingsPage() {
               />
               {t("retention_masked")}
             </label>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium">{t("max_concurrent_recoveries")}</label>
+            <input
+              type="number"
+              value={recoveryPreferences.maxConcurrentRecoveries}
+              min={1}
+              max={32}
+              onChange={(e) =>
+                void handleSchedulerLimitChange(parseInt(e.target.value, 10) || 1)
+              }
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
           </div>
         </div>
       </section>
