@@ -4,6 +4,8 @@
 
 // mod 关键字声明子模块。Rust 会去找 commands/mod.rs、db/mod.rs 等文件。
 // 每个子模块默认是私有的（模块外无法访问），除非用 pub mod 或 pub use 暴露。
+#[cfg(test)]
+mod benchmarks;
 mod commands;
 mod db;
 mod domain;
@@ -63,12 +65,10 @@ pub fn run() {
             // 应用启动时，检查上次运行是否有"正在处理中"却没有正常结束的任务。
             // .unwrap_or_else(|e| {...}) 处理错误：出错时执行闭包，返回空 Vec，
             // 保证程序继续运行，而不是因为这个非关键操作而崩溃。
-            let interrupted_tasks = db
-                .interrupt_processing_tasks()
-                .unwrap_or_else(|e| {
-                    log::error!("启动残留任务修复失败: {e}");
-                    vec![]
-                });
+            let interrupted_tasks = db.interrupt_processing_tasks().unwrap_or_else(|e| {
+                log::error!("启动残留任务修复失败: {e}");
+                vec![]
+            });
             // 遍历所有被修复的任务，记录审计日志。
             // for...in 会取得 interrupted_tasks 的所有权（move）。
             for task in interrupted_tasks {

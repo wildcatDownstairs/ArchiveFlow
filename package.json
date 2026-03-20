@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "bench:recovery": "cargo test --release --manifest-path src-tauri/Cargo.toml recovery_baseline_benchmarks_print_report -- --ignored --nocapture",
     "tauri": "tauri"
   },
   "dependencies": {
