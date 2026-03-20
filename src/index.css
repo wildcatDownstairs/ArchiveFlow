@@ -68,3 +68,52 @@
     --color-ring: #3b82f6;
   }
 }
+
+/* ===== Boot screen animations ===== */
+
+/* Continuous glitch displacement on the logo text */
+@keyframes glitch-shift {
+  0%   { clip-path: inset(40% 0 61% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+  10%  { clip-path: inset(92% 0 1% 0);  transform: translateX(4px);  text-shadow: -3px 0 #ff00c8, 3px 0 #00fff7; }
+  20%  { clip-path: inset(43% 0 1% 0);  transform: translateX(0);    text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+  30%  { clip-path: inset(25% 0 58% 0); transform: translateX(3px);  text-shadow: -2px 0 #ff00c8, 2px 0 #00fff7; }
+  40%  { clip-path: inset(54% 0 7% 0);  transform: translateX(-3px); text-shadow: 2px 0 #ff00c8, -2px 0 #00fff7; }
+  50%  { clip-path: inset(58% 0 43% 0); transform: translateX(4px);  text-shadow: -3px 0 #ff00c8, 3px 0 #00fff7; }
+  60%  { clip-path: inset(50% 0 1% 0);  transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+  70%  { clip-path: inset(67% 0 27% 0); transform: translateX(0);    text-shadow: -2px 0 #ff00c8, 2px 0 #00fff7; }
+  80%  { clip-path: inset(14% 0 73% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+  90%  { clip-path: inset(97% 0 2% 0);  transform: translateX(4px);  text-shadow: -3px 0 #ff00c8, 3px 0 #00fff7; }
+  100% { clip-path: inset(40% 0 61% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+}
+
+/* Blinking underscore cursor on the active step */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* Slow drift of the CRT scanline overlay */
+@keyframes scanline-drift {
+  from { background-position: 0 0; }
+  to   { background-position: 0 100%; }
+}
+
+/* Shimmer sweep across the progress bar fill */
+@keyframes progress-shine {
+  from { background-position: -200% center; }
+  to   { background-position: 200% center; }
+}
+
+/* Boot overlay fade-out */
+@keyframes boot-fadeout {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* Disable motion-heavy animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .boot-glitch-layer { animation: none !important; }
+  .boot-cursor       { animation: none !important; opacity: 1 !important; }
+  .boot-scanlines    { animation: none !important; }
+  .boot-progress-fill { animation: none !important; }
+}
