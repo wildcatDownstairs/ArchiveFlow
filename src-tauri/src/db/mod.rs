@@ -12,6 +12,9 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
+const STARTUP_INTERRUPTED_MESSAGE: &str =
+    "应用启动时检测到上次恢复未正常结束，任务已标记为 interrupted";
+
 impl Database {
     pub fn new(app_dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let db_path = app_dir.join("archiveflow.db");
@@ -274,6 +277,46 @@ impl Database {
             return Err(AppError::TaskNotFound(id.to_string()));
         }
         Ok(())
+    }
+
+    /// 启动时将残留的 processing 任务转为 interrupted
+    pub fn interrupt_processing_tasks(&self) -> Result<Vec<Task>, AppError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, file_path, file_name, file_size, archive_type, status, created_at, updated_at, error_message, found_password, archive_info
+             FROM tasks WHERE status = 'processing' ORDER BY created_at ASC",
+        )?;
+
+        let tasks = stmt.query_map([], Self::parse_task_row)?;
+        let mut interrupted_tasks = Vec::new();
+        for task in tasks {
+            interrupted_tasks.push(task?);
+        }
+
+        drop(stmt);
+
+        if interrupted_tasks.is_empty() {
+            return Ok(interrupted_tasks);
+        }
+
+        let updated_at = Utc::now().to_rfc3339();
+        let updated_at_dt = DateTime::parse_from_rfc3339(&updated_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        for task in &mut interrupted_tasks {
+            conn.execute(
+                "UPDATE tasks
+                 SET status = 'interrupted', updated_at = ?1, error_message = ?2
+                 WHERE id = ?3",
+                params![updated_at, STARTUP_INTERRUPTED_MESSAGE, task.id],
+            )?;
+            task.status = TaskStatus::Interrupted;
+            task.updated_at = updated_at_dt;
+            task.error_message = Some(STARTUP_INTERRUPTED_MESSAGE.to_string());
+        }
+
+        Ok(interrupted_tasks)
     }
 
     /// 更新任务的 archive_info
@@ -546,6 +589,34 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, AppError::TaskNotFound(_)));
+    }
+
+    #[test]
+    fn interrupt_processing_tasks_marks_residual_work_as_interrupted() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+
+        let mut processing = make_test_task("processing-task");
+        processing.status = TaskStatus::Processing;
+        db.insert_task(&processing).unwrap();
+
+        let ready = make_test_task("ready-task");
+        db.insert_task(&ready).unwrap();
+
+        let interrupted = db.interrupt_processing_tasks().unwrap();
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].id, "processing-task");
+        assert_eq!(interrupted[0].status, TaskStatus::Interrupted);
+        assert_eq!(
+            interrupted[0].error_message.as_deref(),
+            Some(STARTUP_INTERRUPTED_MESSAGE)
+        );
+
+        let processing = db.get_task_by_id("processing-task").unwrap().unwrap();
+        assert_eq!(processing.status, TaskStatus::Interrupted);
+
+        let ready = db.get_task_by_id("ready-task").unwrap().unwrap();
+        assert_eq!(ready.status, TaskStatus::Ready);
     }
 
     #[test]

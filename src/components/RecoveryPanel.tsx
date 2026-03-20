@@ -199,7 +199,10 @@ export default function RecoveryPanel({
 
   const displayPassword =
     progress?.status === "found" ? progress.found_password : task.found_password
-  const terminalErrorMessage = terminalStatus === "error" ? task.error_message : null
+  const terminalErrorMessage =
+    terminalStatus === "error" || terminalStatus === "interrupted"
+      ? task.error_message
+      : null
 
   // 状态显示
   const statusDisplay: Record<

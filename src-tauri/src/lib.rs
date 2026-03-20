@@ -5,7 +5,9 @@ mod errors;
 mod services;
 
 use db::Database;
+use domain::audit::AuditEventType;
 use domain::recovery::RecoveryManager;
+use services::audit_service;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -28,6 +30,19 @@ pub fn run() {
             let app_dir = app.path().app_data_dir().expect("无法获取应用数据目录");
             std::fs::create_dir_all(&app_dir).expect("无法创建应用数据目录");
             let db = Database::new(app_dir).expect("数据库初始化失败");
+
+            let interrupted_tasks = db
+                .interrupt_processing_tasks()
+                .expect("启动残留任务修复失败");
+            for task in interrupted_tasks {
+                let _ = audit_service::log_audit_event(
+                    &db,
+                    AuditEventType::TaskInterrupted,
+                    Some(task.id.clone()),
+                    format!("启动修复中断任务: {}", task.file_name),
+                );
+            }
+
             app.manage(db);
 
             // 初始化恢复任务管理器
