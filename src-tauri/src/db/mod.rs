@@ -1,3 +1,5 @@
+mod migrations;
+
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -18,109 +20,13 @@ const STARTUP_INTERRUPTED_MESSAGE: &str =
 impl Database {
     pub fn new(app_dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let db_path = app_dir.join("archiveflow.db");
-        let conn = Connection::open(&db_path)?;
-
-        // 创建表
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                file_path TEXT NOT NULL,
-                file_name TEXT NOT NULL,
-                file_size INTEGER NOT NULL,
-                archive_type TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'ready',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                error_message TEXT,
-                found_password TEXT,
-                archive_info TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS audit_events (
-                id TEXT PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                task_id TEXT,
-                description TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-            CREATE INDEX IF NOT EXISTS idx_audit_task_id ON audit_events(task_id);
-            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_events(timestamp);",
-        )?;
-
-        // 数据库迁移: 添加 archive_info 列（如果不存在）
-        let has_archive_info: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='archive_info'")?
-            .query_row([], |row| row.get::<_, i64>(0))
-            .map(|count| count > 0)?;
-
-        if !has_archive_info {
-            conn.execute("ALTER TABLE tasks ADD COLUMN archive_info TEXT", [])?;
-            log::info!("数据库迁移: 已添加 archive_info 列");
-        }
-
-        let has_found_password: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='found_password'")?
-            .query_row([], |row| row.get::<_, i64>(0))
-            .map(|count| count > 0)?;
-
-        if !has_found_password {
-            conn.execute("ALTER TABLE tasks ADD COLUMN found_password TEXT", [])?;
-            log::info!("数据库迁移: 已添加 found_password 列");
-        }
-
-        Self::normalize_task_statuses(&conn)?;
+        let mut conn = Connection::open(&db_path)?;
+        migrations::migrate(&mut conn)?;
 
         log::info!("数据库初始化完成: {:?}", db_path);
         Ok(Self {
             conn: Mutex::new(conn),
         })
-    }
-
-    fn normalize_task_statuses(conn: &Connection) -> Result<(), rusqlite::Error> {
-        let updates = [
-            (
-                "processing",
-                "UPDATE tasks SET status = 'processing' WHERE status = 'verifying'",
-            ),
-            (
-                "cancelled",
-                "UPDATE tasks SET status = 'cancelled' WHERE status = 'cleaned'",
-            ),
-            (
-                "ready",
-                "UPDATE tasks SET status = 'ready'
-                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
-                 AND archive_type IN ('zip', 'sevenz', 'rar')
-                 AND archive_info IS NOT NULL",
-            ),
-            (
-                "unsupported",
-                "UPDATE tasks SET status = 'unsupported'
-                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
-                 AND archive_type = 'unknown'
-                 AND error_message IS NULL",
-            ),
-            (
-                "failed",
-                "UPDATE tasks SET status = 'failed'
-                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
-                 AND (
-                    (archive_type IN ('zip', 'sevenz', 'rar') AND archive_info IS NULL)
-                    OR (archive_type = 'unknown' AND error_message IS NOT NULL)
-                 )",
-            ),
-        ];
-
-        for (normalized, sql) in updates {
-            let affected = conn.execute(sql, [])?;
-            if affected > 0 {
-                log::info!("数据库状态正规化: {} 条任务 -> {}", affected, normalized);
-            }
-        }
-
-        Ok(())
     }
 
     /// 从 row 解析 Task（共享逻辑）
@@ -459,6 +365,81 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn db_file_path(dir: &tempfile::TempDir) -> PathBuf {
+        dir.path().join("archiveflow.db")
+    }
+
+    fn schema_version(conn: &Connection) -> u32 {
+        conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap()
+    }
+
+    fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({table_name})"))
+            .unwrap();
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap();
+
+        let exists = columns
+            .into_iter()
+            .map(|column| column.unwrap())
+            .any(|column| column == column_name);
+        exists
+    }
+
+    fn create_v1_schema(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE tasks (
+                id TEXT PRIMARY KEY,
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                archive_type TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'ready',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error_message TEXT
+            );
+
+            CREATE TABLE audit_events (
+                id TEXT PRIMARY KEY,
+                event_type TEXT NOT NULL,
+                task_id TEXT,
+                description TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+    }
+
+    fn insert_v1_task(
+        conn: &Connection,
+        id: &str,
+        archive_type: &str,
+        status: &str,
+        error_message: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO tasks (
+                id, file_path, file_name, file_size, archive_type, status, created_at, updated_at, error_message
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                format!("/tmp/{id}.zip"),
+                format!("{id}.zip"),
+                1_i64,
+                archive_type,
+                status,
+                Utc::now().to_rfc3339(),
+                Utc::now().to_rfc3339(),
+                error_message,
+            ],
+        )
+        .unwrap();
+    }
+
     fn make_test_task(id: &str) -> Task {
         Task {
             id: id.to_string(),
@@ -495,6 +476,14 @@ mod tests {
     }
 
     #[test]
+    fn database_new_sets_latest_schema_version() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+        let conn = db.conn.lock().unwrap();
+        assert_eq!(schema_version(&conn), migrations::CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
     fn database_tables_exist() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path().to_path_buf()).unwrap();
@@ -519,6 +508,61 @@ mod tests {
             )
             .unwrap();
         assert_eq!(audit_count, 1);
+    }
+
+    #[test]
+    fn legacy_database_without_user_version_runs_full_migration() {
+        let dir = tempdir().unwrap();
+        let db_path = db_file_path(&dir);
+        let conn = Connection::open(&db_path).unwrap();
+        create_v1_schema(&conn);
+        insert_v1_task(&conn, "legacy-imported", "zip", "imported", None);
+        insert_v1_task(&conn, "legacy-verify", "zip", "verifying", None);
+        drop(conn);
+
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        assert_eq!(schema_version(&conn), migrations::CURRENT_SCHEMA_VERSION);
+        assert!(column_exists(&conn, "tasks", "found_password"));
+        assert!(column_exists(&conn, "tasks", "archive_info"));
+
+        let imported_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = 'legacy-imported'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(imported_status, "failed");
+
+        let verify_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = 'legacy-verify'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(verify_status, "processing");
+    }
+
+    #[test]
+    fn versioned_database_migrates_incrementally_from_v2() {
+        let dir = tempdir().unwrap();
+        let db_path = db_file_path(&dir);
+        let conn = Connection::open(&db_path).unwrap();
+        create_v1_schema(&conn);
+        conn.execute("ALTER TABLE tasks ADD COLUMN found_password TEXT", [])
+            .unwrap();
+        conn.pragma_update(None, "user_version", 2_u32).unwrap();
+        drop(conn);
+
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        assert_eq!(schema_version(&conn), migrations::CURRENT_SCHEMA_VERSION);
+        assert!(column_exists(&conn, "tasks", "found_password"));
+        assert!(column_exists(&conn, "tasks", "archive_info"));
     }
 
     // ─── Task CRUD ──────────────────────────────────────────────────
