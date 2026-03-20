@@ -10,14 +10,14 @@ The current recovery engine is single-threaded. On an i9-13900K (24 logical core
 
 **Goal:** Saturate all available CPU cores, targeting 15–20× throughput increase (≥3.5M p/s on i9-13900K).
 
-## Chosen Approach: Rayon Data Parallelism (Option A)
+## Chosen Approach: `std::thread::spawn` + upfront sharding (Option A)
 
-Split the candidate space into N shards upfront (N = `max(1, num_cpus::get() - 1)`), then run each shard in a dedicated Rayon worker thread with its own file handle and archive instance.
+Split the candidate space into N shards upfront (N = `max(1, num_cpus::get() - 1)`), then run each shard in a dedicated `std::thread::spawn` worker with its own file handle and archive instance. Workers coordinate through `Arc<AtomicBool>`, `Arc<AtomicU64>`, and `mpsc::sync_channel`.
 
-**Why Rayon over Tokio or subprocess:**
-- CPU-bound workload — Rayon's work-stealing pool is optimal; Tokio's async model adds overhead with no benefit
-- No new process management complexity
-- Minimal changes to existing code structure
+**Why this over async runtimes or subprocesses:**
+- CPU-bound workload — plain worker threads avoid async scheduling overhead and map directly to CPU cores
+- ZIP verification needs per-worker archive instances; explicit threads and join handles make lifecycle management straightforward
+- No process management or IPC complexity
 - Cross-platform (Windows + macOS M-series) via `num_cpus`
 
 ## Architecture
@@ -45,7 +45,7 @@ last worker → shard [(N-1)*(T/N), T)  // absorbs remainder
 
 #### Dictionary
 
-Lines are counted once; each worker seeks to its line-offset using `BufReader` + `Seek`. No full file load into memory.
+The recovery config already owns the wordlist in memory, so each worker takes a contiguous slice of that vector. This avoids extra file I/O inside the hot path and keeps shard boundaries deterministic.
 
 ### Worker contract
 
@@ -68,8 +68,8 @@ ZIP: each worker calls `ZipArchive::new(File::open(&path)?)` — `ZipArchive` is
 Main thread loop (500ms interval):
 1. Read `tried_counter` atomically
 2. Compute `speed = (current - last) / elapsed_ms * 1000`
-3. Emit `recovery://progress` Tauri event with `RecoveryProgress`
-4. `result_receiver.try_recv()` — if `Ok(password)`, set `cancel_flag`, update DB, emit success event
+3. Emit `recovery-progress` Tauri event with `RecoveryProgress`
+4. `result_receiver.try_recv()` — if `Ok(password)`, set `cancel_flag`, join workers, emit success event, and return the result to the caller
 
 ### Cancellation
 
@@ -82,7 +82,7 @@ run_recovery()
     │
     ├── compute num_workers, shard boundaries
     │
-    ├── spawn N threads (rayon::scope or std::thread)
+    ├── spawn N threads (std::thread::spawn)
     │   ├── worker_0: shard [0, T/N)       → tried_counter += n, result_sender.send(pw)
     │   ├── worker_1: shard [T/N, 2T/N)    → ...
     │   └── worker_N: shard [(N-1)T/N, T)  → ...
@@ -94,17 +94,17 @@ run_recovery()
 
 ## Error Handling
 
-- `ZipArchive::new()` failure in worker → worker sends `Err` via a separate error channel; if all workers error, the task fails with `RecoveryError::ArchiveOpenFailed`
-- Partial worker failure (e.g. corrupt file detected mid-run) → log warning, set `cancel_flag`, surface error to user
-- Worker panic → caught by `std::thread::JoinHandle::join()` returning `Err`
+- `run_recovery()` performs a preflight `validate_recovery_target()` for ZIP / 7Z / RAR before spawning workers, so corrupt or unsupported archives fail fast instead of being reported as `exhausted`
+- Worker panic is surfaced through `std::thread::JoinHandle::join()`; a disconnected result channel triggers a full join and the panic message is returned as an error
+- Success and cancellation paths also join all workers before returning, so no panic is silently swallowed during shutdown
 
 ## Testing Strategy
 
 1. **Existing 76 unit tests** must continue to pass (public API unchanged)
-2. **New integration tests** (in `recovery_service.rs` test module):
-   - 5-worker brute-force against `fixtures/zip/encrypted_password.zip` → finds correct password
-   - 5-worker brute-force against `fixtures/7z/encrypted_7z.7z` → finds correct password
-   - Cancel mid-run → workers stop within 2 seconds
+2. **Regression tests** (in `recovery_service.rs` test module):
+   - `skip_to()` and shard coverage tests for brute-force and dictionary modes
+   - Corrupt 7Z / RAR inputs are rejected during preflight validation
+   - Worker panic aggregation is reported back to the caller
 3. **Criterion benchmark** (optional, `benches/recovery_bench.rs`): single-thread vs multi-thread throughput on test fixtures
 
 ## Expected Performance
@@ -119,7 +119,7 @@ run_recovery()
 
 | File | Change |
 |---|---|
-| `Cargo.toml` | Add `rayon`, `num_cpus` dependencies |
+| `Cargo.toml` | Add `num_cpus` dependency |
 | `src-tauri/src/services/recovery_service.rs` | Refactor `run_recovery()`, add `skip_to()` to `BruteForceIterator`, new worker functions |
 | `src-tauri/src/domain/recovery.rs` | Extend `RecoveryManager` if needed (cancel_flag already `Arc<AtomicBool>`) |
 

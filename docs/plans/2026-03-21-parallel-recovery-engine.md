@@ -2,27 +2,26 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the single-threaded recovery loop with a Rayon-based parallel worker pool that saturates all CPU cores, targeting 15-20× throughput improvement on multi-core machines.
+**Goal:** Replace the single-threaded recovery loop with a `std::thread::spawn`-based parallel worker pool that saturates all CPU cores, targeting 15-20× throughput improvement on multi-core machines.
 
 **Architecture:** Candidate space (brute-force or dictionary) is split into N equal shards where N = `max(1, num_cpus::get() - 1)`. Each worker thread opens its own file handle, runs its shard independently, and writes to shared atomic counters. The main thread polls progress every 500ms and emits Tauri events.
 
-**Tech Stack:** Rust, `rayon` (work-stealing thread pool), `num_cpus` (cross-platform core detection), existing `zip`/`sevenz-rust`/`unrar` crates, Tauri `AppHandle::emit`.
+**Tech Stack:** Rust, `std::thread::spawn`, `std::sync::mpsc`, `AtomicU64`, `num_cpus` (cross-platform core detection), existing `zip`/`sevenz-rust`/`unrar` crates, Tauri `AppHandle::emit`.
 
 ---
 
-### Task 1: Add dependencies
+### Task 1: Add or confirm dependencies
 
 **Files:**
 - Modify: `src-tauri/Cargo.toml`
 
-**Step 1: Add rayon and num_cpus to Cargo.toml**
+**Step 1: Add or confirm `num_cpus` in Cargo.toml**
 
 ```toml
-rayon = "1.10"
 num_cpus = "1.16"
 ```
 
-Insert after the `unrar` line.
+Insert after the `unrar` line if it is not already present.
 
 **Step 2: Run cargo check to confirm dependencies resolve**
 
@@ -36,7 +35,7 @@ Expected: no errors (warnings ok).
 
 ```bash
 git add src-tauri/Cargo.toml src-tauri/Cargo.lock
-git commit -m "chore: add rayon and num_cpus dependencies"
+git commit -m "chore: 补充 num_cpus 依赖"
 ```
 
 ---
@@ -173,7 +172,7 @@ git commit -m "feat: add skip_to() to BruteForceIterator for sharded parallel ex
 **Context:** The new implementation:
 1. Detects worker count via `num_cpus`
 2. Splits candidate space into N shards
-3. Spawns N threads via `std::thread::spawn` (not rayon — we need explicit join handles for clean shutdown; rayon `scope` requires `Send` closures which conflict with ZIP's non-Send ZipArchive workaround)
+3. Spawns N threads via `std::thread::spawn`, keeping explicit `JoinHandle`s for clean shutdown and panic propagation
 4. Each worker opens its own archive handle
 5. Main thread polls `tried_counter` every 500ms, emits progress, checks for result
 
@@ -563,7 +562,7 @@ Expected: all existing tests pass. The new parallel `run_recovery` does not chan
 
 ```bash
 git add src-tauri/src/services/recovery_service.rs
-git commit -m "feat: parallel recovery engine with per-worker sharding (rayon-free std::thread)"
+git commit -m "feat: 使用 std::thread 实现并行恢复引擎"
 ```
 
 ---
@@ -803,7 +802,7 @@ git commit -m "docs: add parallel recovery engine design doc and implementation 
 
 | File | Change |
 |---|---|
-| `src-tauri/Cargo.toml` | Add `rayon = "1"`, `num_cpus = "1"` |
+| `src-tauri/Cargo.toml` | Add `num_cpus = "1"` |
 | `src-tauri/src/services/recovery_service.rs` | Add `skip_to()`, worker functions, rewrite `run_recovery()`, new tests |
 | `src-tauri/src/domain/recovery.rs` | Add `Clone` to `AttackMode` (if missing) |
 | `src-tauri/src/domain/task.rs` | Add `Clone` to `ArchiveType` (if missing) |

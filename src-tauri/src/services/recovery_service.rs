@@ -1,7 +1,9 @@
+use std::any::Any;
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use sevenz_rust::{Error as SevenZError, Password, SevenZReader};
@@ -9,6 +11,7 @@ use tauri::Emitter;
 
 use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryProgress, RecoveryStatus};
 use crate::domain::task::ArchiveType;
+use crate::services::archive_service;
 
 // ─── 密码验证 ─────────────────────────────────────────────────────
 
@@ -149,6 +152,23 @@ fn validate_7z_payload<R: Read + Seek>(reader: &mut SevenZReader<R>) -> Result<b
     })?;
 
     Ok(validated_any_file)
+}
+
+fn validate_recovery_target(path: &Path, archive_type: &ArchiveType) -> Result<(), String> {
+    let is_encrypted = match archive_type {
+        ArchiveType::Zip => archive_service::inspect_zip(path)?.is_encrypted,
+        ArchiveType::SevenZ => archive_service::inspect_7z(path)?.is_encrypted,
+        ArchiveType::Rar => archive_service::inspect_rar(path)?.is_encrypted,
+        ArchiveType::Unknown => {
+            return Err("未知的归档类型，无法进行密码恢复".to_string());
+        }
+    };
+
+    if is_encrypted {
+        Ok(())
+    } else {
+        Err("当前归档没有可恢复的加密内容".to_string())
+    }
 }
 
 // ─── 暴力破解密码生成器 ────────────────────────────────────────────
@@ -371,6 +391,44 @@ fn run_worker_inner<F>(
     tried_counter.fetch_add(batch_count, Ordering::Relaxed);
 }
 
+fn describe_worker_panic(payload: Box<dyn Any + Send + 'static>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+fn join_worker_handles(handles: Vec<JoinHandle<()>>) -> Vec<String> {
+    let mut panic_messages = Vec::new();
+
+    for handle in handles {
+        if let Err(payload) = handle.join() {
+            panic_messages.push(describe_worker_panic(payload));
+        }
+    }
+
+    panic_messages
+}
+
+fn format_worker_panic_error(panic_messages: &[String]) -> String {
+    if panic_messages.is_empty() {
+        return "恢复 worker 异常退出".to_string();
+    }
+
+    if panic_messages.len() == 1 {
+        return format!("恢复 worker 异常退出: {}", panic_messages[0]);
+    }
+
+    format!(
+        "{} 个恢复 worker 异常退出: {}",
+        panic_messages.len(),
+        panic_messages.join("; ")
+    )
+}
+
 /// A single worker shard for ZIP archives.
 /// Opens its own ZipArchive (ZipArchive is not Send, must be per-thread).
 fn run_zip_worker_shard(
@@ -471,27 +529,7 @@ pub fn run_recovery(
     }
     let path_buf = path.to_path_buf();
 
-    // Validate archive can be opened before spawning workers
-    match archive_type {
-        ArchiveType::Zip => {
-            let file = std::fs::File::open(path).map_err(|e| format!("无法打开文件: {}", e))?;
-            let mut archive =
-                zip::ZipArchive::new(file).map_err(|e| format!("无法解析 ZIP 文件: {}", e))?;
-            let has_encrypted = (0..archive.len()).any(|i| {
-                archive
-                    .by_index_raw(i)
-                    .map(|e| e.encrypted() && !e.is_dir())
-                    .unwrap_or(false)
-            });
-            if !has_encrypted {
-                return Err("该 ZIP 文件没有加密条目".to_string());
-            }
-        }
-        ArchiveType::Unknown => {
-            return Err("未知的归档类型，无法进行密码恢复".to_string());
-        }
-        _ => {}
-    }
+    validate_recovery_target(path, &archive_type)?;
 
     // Compute total candidates and determine shard boundaries
     let total = match &config.mode {
@@ -556,7 +594,7 @@ pub fn run_recovery(
     );
 
     // Spawn worker threads
-    let mut handles = Vec::new();
+    let mut handles = Some(Vec::new());
     for (shard_start, shard_end) in shards {
         let path_clone = path_buf.clone();
         let mode_clone = config.mode.clone();
@@ -587,7 +625,10 @@ pub fn run_recovery(
             ),
             ArchiveType::Unknown => {}
         });
-        handles.push(handle);
+        handles
+            .as_mut()
+            .expect("worker handles should be available before joining")
+            .push(handle);
     }
     // Drop original sender so channel closes when all workers finish
     drop(result_tx);
@@ -606,9 +647,11 @@ pub fn run_recovery(
         match result_rx.try_recv() {
             Ok(password) => {
                 cancel_flag.store(true, Ordering::Relaxed);
-                // Join all workers
-                for h in handles {
-                    let _ = h.join();
+                if let Some(worker_handles) = handles.take() {
+                    let panic_messages = join_worker_handles(worker_handles);
+                    for message in panic_messages {
+                        log::error!("恢复 worker 在成功收敛后 panic: {}", message);
+                    }
                 }
                 let elapsed = start_time.elapsed().as_secs_f64();
                 let speed = if elapsed > 0.0 {
@@ -638,6 +681,13 @@ pub fn run_recovery(
                 break Ok(RecoveryResult::Found(password));
             }
             Err(mpsc::TryRecvError::Disconnected) => {
+                if let Some(worker_handles) = handles.take() {
+                    let panic_messages = join_worker_handles(worker_handles);
+                    if !panic_messages.is_empty() {
+                        break Err(format_worker_panic_error(&panic_messages));
+                    }
+                }
+
                 // All workers finished without finding password (or cancelled)
                 break if cancel_flag.load(Ordering::Relaxed) {
                     Ok(RecoveryResult::Cancelled)
@@ -651,8 +701,11 @@ pub fn run_recovery(
         // Check external cancellation
         if cancel_flag.load(Ordering::Relaxed) {
             // Wait for workers to notice the flag and exit
-            for h in handles {
-                let _ = h.join();
+            if let Some(worker_handles) = handles.take() {
+                let panic_messages = join_worker_handles(worker_handles);
+                for message in panic_messages {
+                    log::error!("恢复 worker 在取消收敛后 panic: {}", message);
+                }
             }
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {
@@ -750,6 +803,7 @@ pub fn run_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn make_content_encrypted_7z(password: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -774,6 +828,14 @@ mod tests {
     fn rar_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         manifest_dir.parent().unwrap().join("fixtures").join("rar")
+    }
+
+    fn write_fake_archive(name: &str, bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(bytes).unwrap();
+        (dir, path)
     }
 
     // ─── BruteForceIterator ─────────────────────────────────────────
@@ -883,6 +945,37 @@ mod tests {
         let shard_1: Vec<String> = shard_passwords(&mode, 2, 5).collect();
         assert_eq!(shard_0, vec!["a", "b"]);
         assert_eq!(shard_1, vec!["c", "d", "e"]);
+    }
+
+    #[test]
+    fn validate_recovery_target_rejects_corrupt_7z() {
+        let (_dir, path) = write_fake_archive(
+            "broken.7z",
+            &[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C, 0x00, 0x00],
+        );
+
+        let error = validate_recovery_target(&path, &ArchiveType::SevenZ).unwrap_err();
+        assert!(error.contains("无法解析 7z 文件"));
+    }
+
+    #[test]
+    fn validate_recovery_target_rejects_corrupt_rar() {
+        let (_dir, path) = write_fake_archive(
+            "broken.rar",
+            &[0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00, 0x00],
+        );
+
+        let error = validate_recovery_target(&path, &ArchiveType::Rar).unwrap_err();
+        assert!(error.contains("RAR"));
+    }
+
+    #[test]
+    fn join_worker_handles_reports_panics() {
+        let handle = std::thread::spawn(|| panic!("boom"));
+        let panic_messages = join_worker_handles(vec![handle]);
+
+        assert_eq!(panic_messages.len(), 1);
+        assert!(panic_messages[0].contains("boom"));
     }
 
     // ─── total_combinations ─────────────────────────────────────────
