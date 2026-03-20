@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Globe, Trash2, Database, Info, ExternalLink, Languages } from "lucide-react"
 import { useAppStore } from "@/stores/appStore"
-import { getAppDataDir, clearAllTasks, clearAuditEvents, getStats } from "@/services/api"
+import {
+  getAppDataDir,
+  clearAllTasks,
+  clearAuditEvents,
+  getStats,
+  recordSettingChange,
+} from "@/services/api"
 
 export default function SettingsPage() {
   const { t, i18n } = useTranslation()
@@ -36,9 +42,19 @@ export default function SettingsPage() {
   }, [])
 
   // Language switching
-  const handleLanguageChange = (lng: string) => {
+  const handleLanguageChange = async (lng: string) => {
+    if (lng === currentLang) {
+      return
+    }
+
     void i18n.changeLanguage(lng)
     setLocale(lng)
+
+    try {
+      await recordSettingChange("language", currentLang, lng)
+    } catch {
+      // Ignore audit write failures in the settings UI.
+    }
   }
 
   // Clear tasks with confirmation
@@ -82,7 +98,7 @@ export default function SettingsPage() {
               name="language"
               value="zh"
               checked={currentLang === "zh"}
-              onChange={() => handleLanguageChange("zh")}
+              onChange={() => void handleLanguageChange("zh")}
               className="h-4 w-4 accent-primary"
             />
             <Languages className="h-4 w-4 text-muted-foreground" />
@@ -94,7 +110,7 @@ export default function SettingsPage() {
               name="language"
               value="en"
               checked={currentLang === "en"}
-              onChange={() => handleLanguageChange("en")}
+              onChange={() => void handleLanguageChange("en")}
               className="h-4 w-4 accent-primary"
             />
             <Languages className="h-4 w-4 text-muted-foreground" />

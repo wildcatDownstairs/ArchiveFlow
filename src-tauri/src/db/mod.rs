@@ -296,6 +296,31 @@ impl Database {
         Ok(())
     }
 
+    /// 清除所有审计事件，并保留一条“已清理”审计记录
+    pub fn clear_audit_events_and_record(&self, event: &AuditEvent) -> Result<u64, AppError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let cleared: i64 = tx.query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))?;
+        let event_type_str = event.event_type.as_str().to_string();
+        let timestamp_str = event.timestamp.to_rfc3339();
+
+        tx.execute("DELETE FROM audit_events", [])?;
+        tx.execute(
+            "INSERT INTO audit_events (id, event_type, task_id, description, timestamp)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                event.id,
+                event_type_str,
+                event.task_id,
+                event.description,
+                timestamp_str,
+            ],
+        )?;
+        tx.commit()?;
+
+        Ok(cleared as u64)
+    }
+
     /// 获取审计事件，按时间戳降序，限制数量
     pub fn get_audit_events(&self, limit: usize) -> Result<Vec<AuditEvent>, AppError> {
         let conn = self.conn.lock().unwrap();
@@ -353,6 +378,7 @@ impl Database {
     }
 
     /// 清除所有审计事件
+    #[cfg(test)]
     pub fn clear_audit_events(&self) -> Result<u64, AppError> {
         let conn = self.conn.lock().unwrap();
         let count = conn.execute("DELETE FROM audit_events", [])?;
@@ -842,5 +868,32 @@ mod tests {
 
         let events = db.get_audit_events(100).unwrap();
         assert!(events.is_empty());
+    }
+
+    #[test]
+    fn clear_audit_events_and_record_keeps_single_marker_event() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+
+        db.insert_audit_event(&make_test_audit_event("e1", None))
+            .unwrap();
+        db.insert_audit_event(&make_test_audit_event("e2", Some("t1")))
+            .unwrap();
+
+        let marker = AuditEvent {
+            id: "marker".to_string(),
+            event_type: AuditEventType::AuditLogsCleared,
+            task_id: None,
+            description: "清除审计日志并保留操作记录: 2 条".to_string(),
+            timestamp: Utc::now(),
+        };
+
+        let cleared = db.clear_audit_events_and_record(&marker).unwrap();
+        assert_eq!(cleared, 2);
+
+        let events = db.get_audit_events(100).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "marker");
+        assert_eq!(events[0].event_type, AuditEventType::AuditLogsCleared);
     }
 }

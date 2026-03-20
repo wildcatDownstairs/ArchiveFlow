@@ -15,6 +15,24 @@ fn supports_password_recovery(archive_type: &ArchiveType) -> bool {
     )
 }
 
+fn describe_attack_mode(mode: &AttackMode) -> String {
+    match mode {
+        AttackMode::Dictionary { wordlist } => {
+            format!("字典攻击 (候选数: {})", wordlist.len())
+        }
+        AttackMode::BruteForce {
+            charset,
+            min_length,
+            max_length,
+        } => format!(
+            "暴力破解 (字符集长度: {}, 长度范围: {}-{})",
+            charset.chars().count(),
+            min_length,
+            max_length
+        ),
+    }
+}
+
 /// 启动密码恢复任务
 ///
 /// - `task_id`: 任务 ID
@@ -136,7 +154,12 @@ pub async fn start_recovery(
         &db,
         AuditEventType::RecoveryStarted,
         Some(task_id.clone()),
-        format!("启动密码恢复: {} (模式: {})", task_id, mode),
+        format!(
+            "启动密码恢复: {} ({:?}, {})",
+            task.file_name,
+            task.archive_type,
+            describe_attack_mode(&config.mode)
+        ),
     );
 
     log::info!("恢复任务已启动: {} (模式: {})", task_id, mode);
@@ -229,7 +252,8 @@ pub async fn start_recovery(
 
 #[cfg(test)]
 mod tests {
-    use super::supports_password_recovery;
+    use super::{describe_attack_mode, supports_password_recovery};
+    use crate::domain::recovery::AttackMode;
     use crate::domain::task::ArchiveType;
 
     #[test]
@@ -242,6 +266,27 @@ mod tests {
     #[test]
     fn password_recovery_rejects_unknown_archive_type() {
         assert!(!supports_password_recovery(&ArchiveType::Unknown));
+    }
+
+    #[test]
+    fn describe_dictionary_attack_mode() {
+        let mode = AttackMode::Dictionary {
+            wordlist: vec!["a".into(), "b".into(), "c".into()],
+        };
+        assert_eq!(describe_attack_mode(&mode), "字典攻击 (候选数: 3)");
+    }
+
+    #[test]
+    fn describe_bruteforce_attack_mode() {
+        let mode = AttackMode::BruteForce {
+            charset: "abc123".into(),
+            min_length: 2,
+            max_length: 5,
+        };
+        assert_eq!(
+            describe_attack_mode(&mode),
+            "暴力破解 (字符集长度: 6, 长度范围: 2-5)"
+        );
     }
 }
 

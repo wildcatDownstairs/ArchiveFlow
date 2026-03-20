@@ -68,6 +68,7 @@ pub fn run() {
             commands::audit_commands::get_audit_events,
             commands::audit_commands::get_task_audit_events,
             commands::audit_commands::clear_audit_events,
+            commands::audit_commands::record_setting_change,
             commands::recovery_commands::start_recovery,
             commands::recovery_commands::cancel_recovery,
         ])

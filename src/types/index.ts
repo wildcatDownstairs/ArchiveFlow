@@ -41,6 +41,7 @@ export interface ArchiveInfo {
 
 export type AuditEventType =
   | "file_imported"
+  | "task_status_updated"
   | "task_deleted"
   | "tasks_cleared"
   | "task_failed"
@@ -52,6 +53,7 @@ export type AuditEventType =
   | "recovery_cancelled"
   | "recovery_failed"
   | "audit_logs_cleared"
+  | "setting_changed"
   | "authorization_granted"
   | "result_exported"
   | "cache_cleared"

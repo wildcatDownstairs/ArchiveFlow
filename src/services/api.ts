@@ -94,6 +94,18 @@ export async function clearAuditEvents(): Promise<number> {
   return invoke<number>("clear_audit_events")
 }
 
+export async function recordSettingChange(
+  settingKey: string,
+  oldValue: string | null,
+  newValue: string,
+): Promise<void> {
+  return invoke<void>("record_setting_change", {
+    settingKey,
+    oldValue,
+    newValue,
+  })
+}
+
 export async function getStats(): Promise<[number, number]> {
   return invoke<[number, number]>("get_stats")
 }

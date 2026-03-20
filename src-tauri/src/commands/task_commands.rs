@@ -17,6 +17,29 @@ fn resolve_file_size(file_path: &str, fallback_size: u64) -> u64 {
         .unwrap_or(fallback_size)
 }
 
+fn format_status_update_description(
+    file_name: &str,
+    previous_status: &TaskStatus,
+    next_status: &TaskStatus,
+    error_message: Option<&str>,
+) -> String {
+    match error_message {
+        Some(error) if !error.is_empty() => format!(
+            "任务状态更新: {} {} -> {} (错误: {})",
+            file_name,
+            previous_status.as_str(),
+            next_status.as_str(),
+            error
+        ),
+        _ => format!(
+            "任务状态更新: {} {} -> {}",
+            file_name,
+            previous_status.as_str(),
+            next_status.as_str()
+        ),
+    }
+}
+
 /// 获取所有任务
 #[command]
 pub async fn get_tasks(db: State<'_, Database>) -> Result<Vec<Task>, AppError> {
@@ -125,13 +148,20 @@ pub async fn delete_task(
         )));
     }
 
+    let task = db
+        .get_task_by_id(&task_id)?
+        .ok_or_else(|| AppError::TaskNotFound(task_id.clone()))?;
     db.delete_task(&task_id)?;
 
     let _ = audit_service::log_audit_event(
         &db,
         AuditEventType::TaskDeleted,
         Some(task_id.clone()),
-        format!("删除任务: {}", task_id),
+        format!(
+            "删除任务: {} (状态: {})",
+            task.file_name,
+            task.status.as_str()
+        ),
     );
 
     log::info!("任务已删除: {}", task_id);
@@ -146,10 +176,28 @@ pub async fn update_task_status(
     error_message: Option<String>,
     db: State<'_, Database>,
 ) -> Result<(), AppError> {
-    TaskStatus::parse_canonical(&status)
+    let next_status = TaskStatus::parse_canonical(&status)
         .ok_or_else(|| AppError::InvalidArgument(format!("无效的状态值: {}", status)))?;
+    let task = db
+        .get_task_by_id(&task_id)?
+        .ok_or_else(|| AppError::TaskNotFound(task_id.clone()))?;
+    let previous_status = task.status.clone();
+    let previous_error = task.error_message.clone();
 
     db.update_task_status(&task_id, &status, error_message.as_deref())?;
+    if previous_status != next_status || previous_error.as_deref() != error_message.as_deref() {
+        let _ = audit_service::log_audit_event(
+            &db,
+            AuditEventType::TaskStatusUpdated,
+            Some(task_id.clone()),
+            format_status_update_description(
+                &task.file_name,
+                &previous_status,
+                &next_status,
+                error_message.as_deref(),
+            ),
+        );
+    }
     log::info!("任务状态已更新: {} -> {}", task_id, status);
     Ok(())
 }
@@ -181,7 +229,7 @@ pub async fn clear_all_tasks(
         &db,
         AuditEventType::TasksCleared,
         None,
-        format!("清除全部任务: {} 条", cleared),
+        format!("批量清空任务: {} 条", cleared),
     );
     Ok(cleared)
 }
@@ -192,4 +240,36 @@ pub async fn get_stats(db: State<'_, Database>) -> Result<(u64, u64), AppError> 
     let task_count = db.get_task_count()?;
     let audit_count = db.get_audit_event_count()?;
     Ok((task_count, audit_count))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_status_update_description;
+    use crate::domain::task::TaskStatus;
+
+    #[test]
+    fn format_status_update_description_includes_error_when_present() {
+        let description = format_status_update_description(
+            "demo.zip",
+            &TaskStatus::Ready,
+            &TaskStatus::Failed,
+            Some("CRC mismatch"),
+        );
+
+        assert!(description.contains("demo.zip"));
+        assert!(description.contains("ready -> failed"));
+        assert!(description.contains("CRC mismatch"));
+    }
+
+    #[test]
+    fn format_status_update_description_omits_error_when_absent() {
+        let description = format_status_update_description(
+            "demo.zip",
+            &TaskStatus::Ready,
+            &TaskStatus::Processing,
+            None,
+        );
+
+        assert_eq!(description, "任务状态更新: demo.zip ready -> processing");
+    }
 }

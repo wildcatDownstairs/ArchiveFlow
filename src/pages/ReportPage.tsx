@@ -10,6 +10,7 @@ import type { AuditEvent, AuditEventType } from "@/types"
 // Badge color mapping for each audit event type
 const EVENT_BADGE_COLORS: Record<AuditEventType, string> = {
   file_imported: "bg-blue-100 text-blue-800",
+  task_status_updated: "bg-sky-100 text-sky-800",
   task_deleted: "bg-orange-100 text-orange-800",
   tasks_cleared: "bg-orange-100 text-orange-800",
   task_failed: "bg-red-100 text-red-800",
@@ -21,6 +22,7 @@ const EVENT_BADGE_COLORS: Record<AuditEventType, string> = {
   recovery_cancelled: "bg-gray-200 text-gray-800",
   recovery_failed: "bg-red-100 text-red-800",
   audit_logs_cleared: "bg-gray-100 text-gray-800",
+  setting_changed: "bg-cyan-100 text-cyan-800",
   authorization_granted: "bg-purple-100 text-purple-800",
   result_exported: "bg-teal-100 text-teal-800",
   cache_cleared: "bg-gray-100 text-gray-800",
@@ -29,6 +31,7 @@ const EVENT_BADGE_COLORS: Record<AuditEventType, string> = {
 // All filterable event types
 const ALL_EVENT_TYPES: AuditEventType[] = [
   "file_imported",
+  "task_status_updated",
   "task_deleted",
   "tasks_cleared",
   "task_failed",
@@ -40,6 +43,7 @@ const ALL_EVENT_TYPES: AuditEventType[] = [
   "recovery_cancelled",
   "recovery_failed",
   "audit_logs_cleared",
+  "setting_changed",
   "authorization_granted",
   "result_exported",
   "cache_cleared",
