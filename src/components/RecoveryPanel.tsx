@@ -87,15 +87,21 @@ export default function RecoveryPanel({
   // unlisten ref
   const unlistenRef = useRef<(() => void) | null>(null)
 
-  const refreshSchedulerState = useCallback(async () => {
+  const refreshSchedulerState = useCallback(async (options?: {
+    respectTaskStatus?: boolean
+  }) => {
     try {
       const [scheduled, snapshot] = await Promise.all([
         api.getScheduledRecovery(task.id),
         api.getRecoverySchedulerSnapshot(),
       ])
+      const shouldRespectTaskStatus = options?.respectTaskStatus ?? true
       setScheduledRecovery(scheduled)
       setSchedulerSnapshot(snapshot)
-      setIsRunning(scheduled?.state === "running" || task.status === "processing")
+      setIsRunning(
+        scheduled?.state === "running" ||
+          (shouldRespectTaskStatus && task.status === "processing"),
+      )
     } catch {
       setScheduledRecovery(null)
       setSchedulerSnapshot(null)
@@ -115,7 +121,8 @@ export default function RecoveryPanel({
       // 终态处理
       if (p.status !== "running") {
         setIsRunning(false)
-        void refreshSchedulerState()
+        setScheduledRecovery(null)
+        void refreshSchedulerState({ respectTaskStatus: false })
         onTaskStatusChange?.()
       }
     }).then((unlisten) => {
@@ -230,12 +237,13 @@ export default function RecoveryPanel({
           setError(t("dictionary_empty"))
           return
         }
-        await api.startRecovery(
+        const nextState = await api.startRecovery(
           task.id,
           "dictionary",
           JSON.stringify({ wordlist: candidates }),
           priority,
         )
+        setIsRunning(nextState === "running")
         if (recoveryPreferences.autoClearDictionaryInput) {
           setWordlistText("")
         }
@@ -249,7 +257,7 @@ export default function RecoveryPanel({
           setError(t("invalid_length"))
           return
         }
-        await api.startRecovery(
+        const nextState = await api.startRecovery(
           task.id,
           "bruteforce",
           JSON.stringify({
@@ -259,12 +267,13 @@ export default function RecoveryPanel({
           }),
           priority,
         )
+        setIsRunning(nextState === "running")
       } else {
         if (!maskPattern.trim()) {
           setError(t("mask_empty"))
           return
         }
-        await api.startRecovery(
+        const nextState = await api.startRecovery(
           task.id,
           "mask",
           JSON.stringify({
@@ -272,8 +281,9 @@ export default function RecoveryPanel({
           }),
           priority,
         )
+        setIsRunning(nextState === "running")
       }
-      await refreshSchedulerState()
+      await refreshSchedulerState({ respectTaskStatus: false })
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -285,7 +295,7 @@ export default function RecoveryPanel({
     try {
       await api.cancelRecovery(task.id)
       setIsRunning(false)
-      await refreshSchedulerState()
+      await refreshSchedulerState({ respectTaskStatus: false })
     } catch (e) {
       setError(String(e))
     }
@@ -295,7 +305,7 @@ export default function RecoveryPanel({
     try {
       await api.pauseRecovery(task.id)
       setIsRunning(false)
-      await refreshSchedulerState()
+      await refreshSchedulerState({ respectTaskStatus: false })
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -305,8 +315,9 @@ export default function RecoveryPanel({
   const handleResume = async () => {
     setError(null)
     try {
-      await api.resumeRecovery(task.id)
-      await refreshSchedulerState()
+      const nextState = await api.resumeRecovery(task.id)
+      setIsRunning(nextState === "running")
+      await refreshSchedulerState({ respectTaskStatus: false })
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -329,6 +340,11 @@ export default function RecoveryPanel({
     progress && progress.total > 0
       ? Math.min((progress.tried / progress.total) * 100, 100)
       : 0
+  const hasTerminalProgress = progress !== null && progress.status !== "running"
+  const showSchedulerCard = scheduledRecovery !== null && !hasTerminalProgress
+  const showRunningProgress = isRunning && progress?.status === "running"
+  const showCancelButton =
+    isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
 
   const terminalStatus:
     | Exclude<RecoveryStatus, "running">
@@ -416,7 +432,7 @@ export default function RecoveryPanel({
         {t("recovery_description")}
       </p>
 
-      {scheduledRecovery && (
+      {showSchedulerCard && scheduledRecovery && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4 space-y-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1 text-sm">
@@ -567,7 +583,7 @@ export default function RecoveryPanel({
         )}
 
       {/* 进度条 - 运行中 */}
-      {isRunning && progress && (
+      {showRunningProgress && progress && (
         <div className="rounded-lg border p-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium text-indigo-600">
@@ -882,7 +898,7 @@ export default function RecoveryPanel({
       )}
 
       {/* 取消按钮 - 运行中 */}
-      {isRunning && scheduledRecovery?.state !== "paused" && (
+      {showCancelButton && (
         <button
           onClick={() => void handleCancel()}
           className="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
