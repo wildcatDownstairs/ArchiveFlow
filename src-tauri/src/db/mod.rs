@@ -299,10 +299,8 @@ impl Database {
             return Ok(interrupted_tasks);
         }
 
-        let updated_at = Utc::now().to_rfc3339();
-        let updated_at_dt = DateTime::parse_from_rfc3339(&updated_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+        let now = Utc::now();
+        let updated_at = now.to_rfc3339();
 
         for task in &mut interrupted_tasks {
             conn.execute(
@@ -312,7 +310,7 @@ impl Database {
                 params![updated_at, STARTUP_INTERRUPTED_MESSAGE, task.id],
             )?;
             task.status = TaskStatus::Interrupted;
-            task.updated_at = updated_at_dt;
+            task.updated_at = now;
             task.error_message = Some(STARTUP_INTERRUPTED_MESSAGE.to_string());
         }
 

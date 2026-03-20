@@ -33,7 +33,10 @@ pub fn run() {
 
             let interrupted_tasks = db
                 .interrupt_processing_tasks()
-                .expect("启动残留任务修复失败");
+                .unwrap_or_else(|e| {
+                    log::error!("启动残留任务修复失败: {e}");
+                    vec![]
+                });
             for task in interrupted_tasks {
                 let _ = audit_service::log_audit_event(
                     &db,
