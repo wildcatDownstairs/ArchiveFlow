@@ -16,6 +16,7 @@ import { readTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
 import { buildDictionaryCandidates } from "@/lib/recoveryCandidates"
+import { useAppStore } from "@/stores/appStore"
 import * as api from "@/services/api"
 import type { RecoveryProgress, RecoveryStatus, Task } from "@/types"
 
@@ -39,6 +40,7 @@ export default function RecoveryPanel({
   onTaskStatusChange,
 }: RecoveryPanelProps) {
   const { t } = useTranslation()
+  const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
 
   // 攻击模式
   const [activeTab, setActiveTab] = useState<AttackTab>("dictionary")
@@ -51,20 +53,15 @@ export default function RecoveryPanel({
     leetspeak: false,
     commonSuffixes: true,
     combineWords: false,
-    includeFilenamePatterns: false,
+    includeFilenamePatterns: recoveryPreferences.autoIncludeFilenamePatterns,
   })
 
   // 暴力破解配置
-  const [charsetFlags, setCharsetFlags] = useState({
-    lowercase: true,
-    uppercase: false,
-    digits: true,
-    special: false,
-  })
+  const [charsetFlags, setCharsetFlags] = useState(recoveryPreferences.defaultCharsetFlags)
   const [customCharset, setCustomCharset] = useState("")
   const [useCustomCharset, setUseCustomCharset] = useState(false)
-  const [minLength, setMinLength] = useState(1)
-  const [maxLength, setMaxLength] = useState(4)
+  const [minLength, setMinLength] = useState(recoveryPreferences.defaultMinLength)
+  const [maxLength, setMaxLength] = useState(recoveryPreferences.defaultMaxLength)
   const [maskPattern, setMaskPattern] = useState("?d?d?d?d")
 
   // 恢复状态
@@ -159,6 +156,9 @@ export default function RecoveryPanel({
           "dictionary",
           JSON.stringify({ wordlist: candidates }),
         )
+        if (recoveryPreferences.autoClearDictionaryInput) {
+          setWordlistText("")
+        }
       } else if (activeTab === "bruteforce") {
         const charset = buildCharset()
         if (charset.length === 0) {
@@ -244,6 +244,10 @@ export default function RecoveryPanel({
 
   const displayPassword =
     progress?.status === "found" ? progress.found_password : task.found_password
+  const visiblePassword =
+    displayPassword && recoveryPreferences.resultRetentionPolicy === "masked"
+      ? "•".repeat(displayPassword.length)
+      : displayPassword
   const terminalErrorMessage =
     terminalStatus === "error" || terminalStatus === "interrupted"
       ? task.error_message
@@ -311,7 +315,7 @@ export default function RecoveryPanel({
               className="flex-1 rounded border border-green-200 bg-white px-3 py-2 font-mono text-base leading-relaxed break-all text-slate-950 select-all shadow-sm"
               title={displayPassword}
             >
-              {displayPassword}
+              {visiblePassword}
             </code>
             <button
               onClick={() => void handleCopy(displayPassword)}

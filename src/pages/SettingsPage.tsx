@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Globe, Trash2, Database, Info, ExternalLink, Languages } from "lucide-react"
-import { useAppStore } from "@/stores/appStore"
+import {
+  Globe,
+  Trash2,
+  Database,
+  Info,
+  ExternalLink,
+  Languages,
+  SlidersHorizontal,
+} from "lucide-react"
+import {
+  useAppStore,
+  type CharsetFlags,
+  type ResultRetentionPolicy,
+} from "@/stores/appStore"
 import {
   getAppDataDir,
   clearAllTasks,
@@ -10,9 +22,16 @@ import {
   recordSettingChange,
 } from "@/services/api"
 
+function stringifySetting(value: unknown): string {
+  if (typeof value === "string") return value
+  return JSON.stringify(value)
+}
+
 export default function SettingsPage() {
   const { t, i18n } = useTranslation()
   const setLocale = useAppStore((s) => s.setLocale)
+  const recoveryPreferences = useAppStore((s) => s.recoveryPreferences)
+  const updateRecoveryPreferences = useAppStore((s) => s.updateRecoveryPreferences)
 
   const [appDataDir, setAppDataDir] = useState("")
   const [taskCount, setTaskCount] = useState(0)
@@ -33,31 +52,74 @@ export default function SettingsPage() {
     getAppDataDir()
       .then((dir) => setAppDataDir(dir))
       .catch(() => {})
-    getStats()
-      .then(([tasks, audits]) => {
-        setTaskCount(tasks)
-        setAuditCount(audits)
-      })
-      .catch(() => {})
-  }, [])
+    void loadStats()
+  }, [loadStats])
 
-  // Language switching
-  const handleLanguageChange = async (lng: string) => {
-    if (lng === currentLang) {
-      return
-    }
-
-    void i18n.changeLanguage(lng)
-    setLocale(lng)
-
+  const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
     try {
-      await recordSettingChange("language", currentLang, lng)
+      await recordSettingChange(
+        key,
+        stringifySetting(oldValue),
+        stringifySetting(newValue),
+      )
     } catch {
       // Ignore audit write failures in the settings UI.
     }
   }
 
-  // Clear tasks with confirmation
+  const handleLanguageChange = async (lng: string) => {
+    if (lng === currentLang) return
+
+    void i18n.changeLanguage(lng)
+    setLocale(lng)
+    await persistSettingChange("language", currentLang, lng)
+  }
+
+  const handleCharsetFlagChange = async (key: keyof CharsetFlags, value: boolean) => {
+    const oldFlags = recoveryPreferences.defaultCharsetFlags
+    if (oldFlags[key] === value) return
+
+    const nextFlags = { ...oldFlags, [key]: value }
+    updateRecoveryPreferences({ defaultCharsetFlags: nextFlags })
+    await persistSettingChange(
+      `recovery.default_charset_flags.${key}`,
+      oldFlags[key],
+      value,
+    )
+  }
+
+  const handleNumericPreferenceChange = async (
+    key: "defaultMinLength" | "defaultMaxLength",
+    value: number,
+  ) => {
+    const normalized = Math.max(1, value)
+    if (recoveryPreferences[key] === normalized) return
+
+    updateRecoveryPreferences({ [key]: normalized })
+    await persistSettingChange(`recovery.${key}`, recoveryPreferences[key], normalized)
+  }
+
+  const handleBooleanPreferenceChange = async (
+    key: "autoIncludeFilenamePatterns" | "autoClearDictionaryInput",
+    value: boolean,
+  ) => {
+    if (recoveryPreferences[key] === value) return
+
+    updateRecoveryPreferences({ [key]: value })
+    await persistSettingChange(`recovery.${key}`, recoveryPreferences[key], value)
+  }
+
+  const handleRetentionPolicyChange = async (value: ResultRetentionPolicy) => {
+    if (recoveryPreferences.resultRetentionPolicy === value) return
+
+    updateRecoveryPreferences({ resultRetentionPolicy: value })
+    await persistSettingChange(
+      "recovery.resultRetentionPolicy",
+      recoveryPreferences.resultRetentionPolicy,
+      value,
+    )
+  }
+
   const handleClearTasks = async () => {
     try {
       await clearAllTasks()
@@ -68,7 +130,6 @@ export default function SettingsPage() {
     }
   }
 
-  // Clear audit logs with confirmation
   const handleClearAudit = async () => {
     try {
       await clearAuditEvents()
@@ -82,10 +143,9 @@ export default function SettingsPage() {
   const currentLang = i18n.language
 
   return (
-    <div className="p-6 space-y-8 max-w-2xl">
+    <div className="p-6 space-y-8 max-w-3xl">
       <h1 className="text-2xl font-bold">{t("settings")}</h1>
 
-      {/* Section 1: Language */}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Globe className="h-5 w-5 text-muted-foreground" />
@@ -119,14 +179,134 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Section 2: Data Management */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold">{t("recovery_defaults")}</h2>
+        </div>
+        <div className="rounded-lg border p-4 space-y-5">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("default_charset")}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+              {(
+                [
+                  ["lowercase", t("charset_lowercase")],
+                  ["uppercase", t("charset_uppercase")],
+                  ["digits", t("charset_digits")],
+                  ["special", t("charset_special")],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={recoveryPreferences.defaultCharsetFlags[key]}
+                    onChange={(e) => void handleCharsetFlagChange(key, e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-sm font-medium">{t("default_min_length")}</label>
+              <input
+                type="number"
+                value={recoveryPreferences.defaultMinLength}
+                min={1}
+                max={16}
+                onChange={(e) =>
+                  void handleNumericPreferenceChange(
+                    "defaultMinLength",
+                    parseInt(e.target.value, 10) || 1,
+                  )
+                }
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">{t("default_max_length")}</label>
+              <input
+                type="number"
+                value={recoveryPreferences.defaultMaxLength}
+                min={1}
+                max={16}
+                onChange={(e) =>
+                  void handleNumericPreferenceChange(
+                    "defaultMaxLength",
+                    parseInt(e.target.value, 10) || 1,
+                  )
+                }
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 text-sm">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={recoveryPreferences.autoIncludeFilenamePatterns}
+                onChange={(e) =>
+                  void handleBooleanPreferenceChange(
+                    "autoIncludeFilenamePatterns",
+                    e.target.checked,
+                  )
+                }
+                className="rounded border-gray-300"
+              />
+              {t("include_filename_patterns")}
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={recoveryPreferences.autoClearDictionaryInput}
+                onChange={(e) =>
+                  void handleBooleanPreferenceChange(
+                    "autoClearDictionaryInput",
+                    e.target.checked,
+                  )
+                }
+                className="rounded border-gray-300"
+              />
+              {t("auto_clear_dictionary_input")}
+            </label>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("result_retention_policy")}</p>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="resultRetentionPolicy"
+                checked={recoveryPreferences.resultRetentionPolicy === "plaintext"}
+                onChange={() => void handleRetentionPolicyChange("plaintext")}
+                className="h-4 w-4 accent-primary"
+              />
+              {t("retention_plaintext")}
+            </label>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="radio"
+                name="resultRetentionPolicy"
+                checked={recoveryPreferences.resultRetentionPolicy === "masked"}
+                onChange={() => void handleRetentionPolicyChange("masked")}
+                className="h-4 w-4 accent-primary"
+              />
+              {t("retention_masked")}
+            </label>
+          </div>
+        </div>
+      </section>
+
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Database className="h-5 w-5 text-muted-foreground" />
           <h2 className="text-lg font-semibold">{t("data_management")}</h2>
         </div>
         <div className="rounded-lg border p-4 space-y-4">
-          {/* Data directory */}
           {appDataDir && (
             <div className="flex items-start gap-2 text-sm">
               <span className="text-muted-foreground shrink-0">{t("app_data_dir")}:</span>
@@ -134,7 +314,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Stats */}
           <div className="flex gap-6 text-sm">
             <span>
               {t("task_count")}: <strong>{taskCount}</strong>
@@ -144,7 +323,6 @@ export default function SettingsPage() {
             </span>
           </div>
 
-          {/* Clear tasks button */}
           <div className="space-y-2">
             {confirmAction === "tasks" ? (
               <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
@@ -176,7 +354,6 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* Clear audit logs button */}
           <div className="space-y-2">
             {confirmAction === "audit" ? (
               <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
@@ -210,7 +387,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Section 3: About */}
       <section className="space-y-4">
         <div className="flex items-center gap-2">
           <Info className="h-5 w-5 text-muted-foreground" />
