@@ -7,6 +7,7 @@ use std::time::Instant;
 use tauri::Emitter;
 
 use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryProgress, RecoveryStatus};
+use crate::domain::task::ArchiveType;
 
 // ─── 密码验证 ─────────────────────────────────────────────────────
 
@@ -61,6 +62,48 @@ pub fn try_password_zip(file_path: &Path, password: &str) -> bool {
     };
 
     try_password_on_archive(&mut archive, index, password)
+}
+
+/// 尝试用给定密码打开 7z 文件。
+/// 每次调用都会重新打开文件（7z 库不支持复用）。
+/// 返回 true 表示密码正确，false 表示密码错误。
+pub fn try_password_7z(file_path: &Path, password: &str) -> bool {
+    use sevenz_rust::{Password, SevenZReader};
+
+    match SevenZReader::open(file_path, Password::from(password)) {
+        Ok(_) => true,   // 成功打开 → 密码正确
+        Err(_) => false, // 打开失败 → 密码错误或其他错误
+    }
+}
+
+/// 尝试用给定密码解密 RAR 文件中第一个加密条目。
+/// 每次调用都会重新打开文件。
+/// 返回 true 表示密码正确，false 表示密码错误。
+pub fn try_password_rar(file_path: &Path, password: &str) -> bool {
+    use unrar::Archive as RarArchive;
+
+    let file_path_str = file_path.to_string_lossy().to_string();
+
+    // 用密码打开并尝试处理（解压）第一个条目
+    let open_result = RarArchive::with_password(&file_path_str, password).open_for_processing();
+
+    let archive = match open_result {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+
+    // 读取第一个文件头
+    let header = match archive.read_header() {
+        Ok(Some(h)) => h,
+        Ok(None) => return false, // 空归档
+        Err(_) => return false,   // 读取头失败（加密头+错误密码）
+    };
+
+    // 尝试读取（解密）文件内容
+    match header.read() {
+        Ok(_) => true,   // 成功读取 → 密码正确
+        Err(_) => false, // 失败 → 密码错误
+    }
 }
 
 // ─── 暴力破解密码生成器 ────────────────────────────────────────────
@@ -196,6 +239,7 @@ pub enum RecoveryResult {
 pub fn run_recovery(
     config: RecoveryConfig,
     file_path: String,
+    archive_type: ArchiveType,
     app_handle: tauri::AppHandle,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<RecoveryResult, String> {
@@ -205,22 +249,46 @@ pub fn run_recovery(
         return Err(format!("文件不存在: {}", file_path));
     }
 
-    // 打开文件并创建 ZipArchive（只做一次）
-    let file = std::fs::File::open(path).map_err(|e| format!("无法打开文件: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("无法解析 ZIP 文件: {}", e))?;
+    // 根据归档类型，准备密码验证闭包
+    // ZIP: 打开一次文件，找到加密条目索引，循环复用
+    // 7Z/RAR: 每次都重新打开文件（库限制）
+    enum PasswordTester {
+        Zip {
+            archive: zip::ZipArchive<std::fs::File>,
+            encrypted_index: usize,
+        },
+        SevenZ,
+        Rar,
+    }
 
-    // 找到第一个加密的非目录条目的索引（只做一次）
-    let encrypted_index = (0..archive.len()).find(|&i| {
-        archive
-            .by_index_raw(i)
-            .map(|entry| entry.encrypted() && !entry.is_dir())
-            .unwrap_or(false)
-    });
+    let mut tester = match archive_type {
+        ArchiveType::Zip => {
+            let file = std::fs::File::open(path).map_err(|e| format!("无法打开文件: {}", e))?;
+            let mut archive =
+                zip::ZipArchive::new(file).map_err(|e| format!("无法解析 ZIP 文件: {}", e))?;
 
-    let index = match encrypted_index {
-        Some(i) => i,
-        None => return Err("该 ZIP 文件没有加密条目".to_string()),
+            let encrypted_index = (0..archive.len()).find(|&i| {
+                archive
+                    .by_index_raw(i)
+                    .map(|entry| entry.encrypted() && !entry.is_dir())
+                    .unwrap_or(false)
+            });
+
+            let index = match encrypted_index {
+                Some(i) => i,
+                None => return Err("该 ZIP 文件没有加密条目".to_string()),
+            };
+
+            PasswordTester::Zip {
+                archive,
+                encrypted_index: index,
+            }
+        }
+        ArchiveType::SevenZ => PasswordTester::SevenZ,
+        ArchiveType::Rar => PasswordTester::Rar,
+        ArchiveType::Unknown => {
+            return Err("未知的归档类型，无法进行密码恢复".to_string());
+        }
     };
 
     let task_id = config.task_id.clone();
@@ -291,8 +359,16 @@ pub fn run_recovery(
 
         tried += 1;
 
-        // 尝试密码（复用已打开的 archive 和已确定的 index）
-        if try_password_on_archive(&mut archive, index, &password) {
+        // 尝试密码（根据归档类型调用对应的验证方法）
+        let password_correct = match &mut tester {
+            PasswordTester::Zip {
+                archive,
+                encrypted_index,
+            } => try_password_on_archive(archive, *encrypted_index, &password),
+            PasswordTester::SevenZ => try_password_7z(path, &password),
+            PasswordTester::Rar => try_password_rar(path, &password),
+        };
+        if password_correct {
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {
                 tried as f64 / elapsed
@@ -378,9 +454,19 @@ pub fn run_recovery(
 mod tests {
     use super::*;
 
-    fn fixtures_dir() -> std::path::PathBuf {
+    fn zip_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         manifest_dir.parent().unwrap().join("fixtures").join("zip")
+    }
+
+    fn sevenz_fixtures_dir() -> std::path::PathBuf {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.parent().unwrap().join("fixtures").join("7z")
+    }
+
+    fn rar_fixtures_dir() -> std::path::PathBuf {
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir.parent().unwrap().join("fixtures").join("rar")
     }
 
     // ─── BruteForceIterator ─────────────────────────────────────────
@@ -450,31 +536,31 @@ mod tests {
 
     #[test]
     fn try_password_zip_correct_on_aes() {
-        let path = fixtures_dir().join("encrypted-aes.zip");
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
         assert!(try_password_zip(&path, "test123"));
     }
 
     #[test]
     fn try_password_zip_wrong_on_aes() {
-        let path = fixtures_dir().join("encrypted-aes.zip");
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
         assert!(!try_password_zip(&path, "wrong"));
     }
 
     #[test]
     fn try_password_zip_correct_on_strong() {
-        let path = fixtures_dir().join("encrypted-strong.zip");
+        let path = zip_fixtures_dir().join("encrypted-strong.zip");
         assert!(try_password_zip(&path, "Str0ng!P@ss"));
     }
 
     #[test]
     fn try_password_zip_on_unencrypted_returns_false() {
-        let path = fixtures_dir().join("normal.zip");
+        let path = zip_fixtures_dir().join("normal.zip");
         assert!(!try_password_zip(&path, "anything"));
     }
 
     #[test]
     fn try_password_zip_nonexistent_file_returns_false() {
-        let path = fixtures_dir().join("does-not-exist.zip");
+        let path = zip_fixtures_dir().join("does-not-exist.zip");
         assert!(!try_password_zip(&path, "test"));
     }
 
@@ -482,11 +568,10 @@ mod tests {
 
     #[test]
     fn try_password_on_archive_correct() {
-        let path = fixtures_dir().join("encrypted-aes.zip");
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
 
-        // Find the first encrypted entry index
         let index = (0..archive.len())
             .find(|&i| {
                 archive
@@ -501,7 +586,7 @@ mod tests {
 
     #[test]
     fn try_password_on_archive_wrong() {
-        let path = fixtures_dir().join("encrypted-aes.zip");
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
         let file = std::fs::File::open(&path).unwrap();
         let mut archive = zip::ZipArchive::new(file).unwrap();
 
@@ -519,5 +604,66 @@ mod tests {
             index,
             "wrong_password"
         ));
+    }
+
+    // ─── try_password_7z ────────────────────────────────────────────
+
+    #[test]
+    fn try_password_7z_correct() {
+        let path = sevenz_fixtures_dir().join("encrypted.7z");
+        assert!(try_password_7z(&path, "test123"));
+    }
+
+    #[test]
+    fn try_password_7z_wrong() {
+        let path = sevenz_fixtures_dir().join("encrypted.7z");
+        assert!(!try_password_7z(&path, "wrong_password"));
+    }
+
+    #[test]
+    fn try_password_7z_on_unencrypted_returns_true() {
+        // 非加密 7z 用任何密码都能打开
+        let path = sevenz_fixtures_dir().join("normal.7z");
+        assert!(try_password_7z(&path, "anything"));
+    }
+
+    #[test]
+    fn try_password_7z_nonexistent_file_returns_false() {
+        let path = sevenz_fixtures_dir().join("does-not-exist.7z");
+        assert!(!try_password_7z(&path, "test"));
+    }
+
+    // ─── try_password_rar ───────────────────────────────────────────
+
+    #[test]
+    fn try_password_rar_correct() {
+        // crypted.rar (from unrar test data) — password: "unrar"
+        let path = rar_fixtures_dir().join("encrypted.rar");
+        assert!(try_password_rar(&path, "unrar"));
+    }
+
+    #[test]
+    fn try_password_rar_wrong() {
+        let path = rar_fixtures_dir().join("encrypted.rar");
+        assert!(!try_password_rar(&path, "wrong_password"));
+    }
+
+    #[test]
+    fn try_password_rar_encrypted_headers_correct() {
+        // comment-hpw-password.rar — password: "password"
+        let path = rar_fixtures_dir().join("encrypted-headers.rar");
+        assert!(try_password_rar(&path, "password"));
+    }
+
+    #[test]
+    fn try_password_rar_encrypted_headers_wrong() {
+        let path = rar_fixtures_dir().join("encrypted-headers.rar");
+        assert!(!try_password_rar(&path, "wrong"));
+    }
+
+    #[test]
+    fn try_password_rar_nonexistent_file_returns_false() {
+        let path = rar_fixtures_dir().join("does-not-exist.rar");
+        assert!(!try_password_rar(&path, "test"));
     }
 }

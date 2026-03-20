@@ -22,7 +22,7 @@ interface TaskState {
   fetchTask: (taskId: string) => Promise<Task | null>
   updateTaskStatus: (
     taskId: string,
-    status: string,
+    status: Task["status"],
     errorMessage?: string | null,
   ) => Promise<void>
 }
@@ -67,10 +67,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
   updateTaskStatus: async (taskId, status, errorMessage) => {
     await api.updateTaskStatus(taskId, status, errorMessage)
-    // 更新本地状态
     set({
       tasks: get().tasks.map((t) =>
-        t.id === taskId ? { ...t, status: status as Task["status"], error_message: errorMessage ?? null } : t,
+        t.id === taskId
+          ? { ...t, status, error_message: errorMessage ?? null }
+          : t,
       ),
     })
   },

@@ -19,17 +19,14 @@ const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
 }
 
 const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
-  imported: "bg-blue-100 text-blue-800",
-  inspecting: "bg-yellow-100 text-yellow-800",
-  waiting_authorization: "bg-purple-100 text-purple-800",
   ready: "bg-cyan-100 text-cyan-800",
   processing: "bg-indigo-100 text-indigo-800",
-  verifying: "bg-yellow-100 text-yellow-800",
   succeeded: "bg-green-100 text-green-800",
   exhausted: "bg-amber-100 text-amber-800",
   cancelled: "bg-gray-200 text-gray-800",
   failed: "bg-red-100 text-red-800",
-  cleaned: "bg-gray-100 text-gray-800",
+  unsupported: "bg-slate-200 text-slate-800",
+  interrupted: "bg-orange-100 text-orange-800",
 }
 
 export default function HomePage() {

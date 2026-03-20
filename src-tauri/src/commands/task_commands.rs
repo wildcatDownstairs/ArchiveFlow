@@ -1,12 +1,21 @@
 use tauri::{command, AppHandle, Manager, State};
+
 use crate::db::Database;
-use crate::domain::recovery::RecoveryManager;
-use crate::domain::task::{Task, TaskStatus, ArchiveType};
-use crate::errors::AppError;
-use crate::services::audit_service;
 use crate::domain::audit::AuditEventType;
+use crate::domain::recovery::RecoveryManager;
+use crate::domain::task::{ArchiveType, Task, TaskStatus};
+use crate::errors::AppError;
+use crate::services::archive_service;
+use crate::services::audit_service;
 use chrono::Utc;
+use std::path::Path;
 use uuid::Uuid;
+
+fn resolve_file_size(file_path: &str, fallback_size: u64) -> u64 {
+    std::fs::metadata(file_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(fallback_size)
+}
 
 /// 获取所有任务
 #[command]
@@ -23,26 +32,75 @@ pub async fn create_task(
     db: State<'_, Database>,
 ) -> Result<Task, AppError> {
     let now = Utc::now();
+    let resolved_file_size = resolve_file_size(&file_path, file_size);
+    let path = Path::new(&file_path);
+
+    let (archive_type, archive_info, error_message) = if path.exists() {
+        match archive_service::inspect_archive(path) {
+            Ok((at, info)) => (at, info, None),
+            Err(e) => {
+                log::warn!("创建任务时检测归档失败 ({}): {}", file_path, e);
+                (ArchiveType::Unknown, None, Some(e))
+            }
+        }
+    } else {
+        (
+            ArchiveType::Unknown,
+            None,
+            Some(format!("文件不存在: {}", file_path)),
+        )
+    };
+
+    let status = TaskStatus::for_import_result(
+        &archive_type,
+        archive_info.is_some(),
+        error_message.as_deref(),
+    );
+
     let task = Task {
         id: Uuid::new_v4().to_string(),
         file_path,
         file_name,
-        file_size,
-        archive_type: ArchiveType::Unknown,
-        status: TaskStatus::Imported,
+        file_size: resolved_file_size,
+        archive_type,
+        status,
         created_at: now,
         updated_at: now,
-        error_message: None,
+        error_message,
         found_password: None,
-        archive_info: None,
+        archive_info,
     };
     db.insert_task(&task)?;
     let _ = audit_service::log_audit_event(
         &db,
-        AuditEventType::TaskCreated,
+        AuditEventType::FileImported,
         Some(task.id.clone()),
-        format!("创建任务: {}", task.file_name),
+        format!(
+            "创建任务: {} (状态: {})",
+            task.file_name,
+            task.status.as_str()
+        ),
     );
+    if task.status == TaskStatus::Unsupported {
+        let _ = audit_service::log_audit_event(
+            &db,
+            AuditEventType::TaskUnsupported,
+            Some(task.id.clone()),
+            format!("任务不受支持: {} ({:?})", task.file_name, task.archive_type),
+        );
+    } else if task.status == TaskStatus::Failed {
+        let _ = audit_service::log_audit_event(
+            &db,
+            AuditEventType::TaskFailed,
+            Some(task.id.clone()),
+            format!(
+                "任务创建失败: {}",
+                task.error_message
+                    .clone()
+                    .unwrap_or_else(|| task.file_name.clone())
+            ),
+        );
+    }
     log::info!("任务已创建: {} ({})", task.file_name, task.id);
     Ok(task)
 }
@@ -69,7 +127,6 @@ pub async fn delete_task(
 
     db.delete_task(&task_id)?;
 
-    // 记录任务删除审计事件
     let _ = audit_service::log_audit_event(
         &db,
         AuditEventType::TaskDeleted,
@@ -89,9 +146,8 @@ pub async fn update_task_status(
     error_message: Option<String>,
     db: State<'_, Database>,
 ) -> Result<(), AppError> {
-    // 校验 status 字符串是否是有效的 TaskStatus
-    let _: TaskStatus = serde_json::from_value(serde_json::Value::String(status.clone()))
-        .map_err(|_| AppError::InvalidArgument(format!("无效的状态值: {}", status)))?;
+    TaskStatus::parse_canonical(&status)
+        .ok_or_else(|| AppError::InvalidArgument(format!("无效的状态值: {}", status)))?;
 
     db.update_task_status(&task_id, &status, error_message.as_deref())?;
     log::info!("任务状态已更新: {} -> {}", task_id, status);

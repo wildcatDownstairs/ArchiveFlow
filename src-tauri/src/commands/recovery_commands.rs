@@ -1,11 +1,12 @@
 use tauri::{command, AppHandle, Manager, State};
 
 use crate::db::Database;
-use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryManager};
-use crate::errors::AppError;
-use crate::services::recovery_service::{self, RecoveryResult};
-use crate::services::audit_service;
 use crate::domain::audit::AuditEventType;
+use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryManager};
+use crate::domain::task::{ArchiveType, TaskStatus};
+use crate::errors::AppError;
+use crate::services::audit_service;
+use crate::services::recovery_service::{self, RecoveryResult};
 
 /// 启动密码恢复任务
 ///
@@ -28,7 +29,39 @@ pub async fn start_recovery(
         .get_task_by_id(&task_id)?
         .ok_or_else(|| AppError::TaskNotFound(task_id.clone()))?;
 
+    if task.archive_type != ArchiveType::Zip {
+        return Err(AppError::InvalidArgument(
+            "当前仅支持 ZIP 归档的密码恢复".to_string(),
+        ));
+    }
+
+    if !matches!(
+        task.status,
+        TaskStatus::Ready
+            | TaskStatus::Failed
+            | TaskStatus::Cancelled
+            | TaskStatus::Exhausted
+            | TaskStatus::Interrupted
+    ) {
+        return Err(AppError::InvalidArgument(format!(
+            "当前任务状态不允许启动恢复: {}",
+            task.status.as_str()
+        )));
+    }
+
+    if !task
+        .archive_info
+        .as_ref()
+        .map(|info| info.is_encrypted)
+        .unwrap_or(false)
+    {
+        return Err(AppError::InvalidArgument(
+            "当前归档没有可恢复的加密内容".to_string(),
+        ));
+    }
+
     let file_path = task.file_path.clone();
+    let archive_type = task.archive_type.clone();
 
     // 2. 解析攻击模式
     let attack_mode = match mode.as_str() {
@@ -39,9 +72,7 @@ pub async fn start_recovery(
             }
             let cfg: DictConfig = serde_json::from_str(&config_json)?;
             if cfg.wordlist.is_empty() {
-                return Err(AppError::InvalidArgument(
-                    "字典列表不能为空".to_string(),
-                ));
+                return Err(AppError::InvalidArgument("字典列表不能为空".to_string()));
             }
             AttackMode::Dictionary {
                 wordlist: cfg.wordlist,
@@ -56,14 +87,10 @@ pub async fn start_recovery(
             }
             let cfg: BfConfig = serde_json::from_str(&config_json)?;
             if cfg.charset.is_empty() {
-                return Err(AppError::InvalidArgument(
-                    "字符集不能为空".to_string(),
-                ));
+                return Err(AppError::InvalidArgument("字符集不能为空".to_string()));
             }
             if cfg.min_length == 0 {
-                return Err(AppError::InvalidArgument(
-                    "最小长度必须大于 0".to_string(),
-                ));
+                return Err(AppError::InvalidArgument("最小长度必须大于 0".to_string()));
             }
             if cfg.max_length < cfg.min_length {
                 return Err(AppError::InvalidArgument(
@@ -100,7 +127,7 @@ pub async fn start_recovery(
     // 记录恢复任务启动审计事件
     let _ = audit_service::log_audit_event(
         &db,
-        AuditEventType::TaskStarted,
+        AuditEventType::RecoveryStarted,
         Some(task_id.clone()),
         format!("启动密码恢复: {} (模式: {})", task_id, mode),
     );
@@ -115,6 +142,7 @@ pub async fn start_recovery(
         let result = recovery_service::run_recovery(
             config,
             file_path,
+            archive_type,
             app_handle_clone.clone(),
             cancel_flag,
         );
@@ -137,7 +165,7 @@ pub async fn start_recovery(
                 // 记录密码恢复成功审计事件
                 let _ = audit_service::log_audit_event(
                     &db,
-                    AuditEventType::TaskCompleted,
+                    AuditEventType::RecoverySucceeded,
                     Some(task_id_clone.clone()),
                     format!("密码恢复成功: {}", task_id_clone),
                 );
@@ -145,16 +173,11 @@ pub async fn start_recovery(
             Ok(RecoveryResult::Exhausted) => {
                 // 穷尽所有密码 → exhausted
                 log::info!("恢复已穷尽: {}", task_id_clone);
-                let _ = db.update_task_recovery_result(
-                    &task_id_clone,
-                    "exhausted",
-                    None,
-                    None,
-                );
+                let _ = db.update_task_recovery_result(&task_id_clone, "exhausted", None, None);
                 // 记录密码穷尽审计事件
                 let _ = audit_service::log_audit_event(
                     &db,
-                    AuditEventType::TaskFailed,
+                    AuditEventType::RecoveryExhausted,
                     Some(task_id_clone.clone()),
                     format!("密码穷尽未找到: {}", task_id_clone),
                 );
@@ -162,16 +185,11 @@ pub async fn start_recovery(
             Ok(RecoveryResult::Cancelled) => {
                 // 用户取消 → cancelled
                 log::info!("恢复已取消: {}", task_id_clone);
-                let _ = db.update_task_recovery_result(
-                    &task_id_clone,
-                    "cancelled",
-                    None,
-                    None,
-                );
+                let _ = db.update_task_recovery_result(&task_id_clone, "cancelled", None, None);
                 // 记录用户取消恢复审计事件
                 let _ = audit_service::log_audit_event(
                     &db,
-                    AuditEventType::TaskFailed,
+                    AuditEventType::RecoveryCancelled,
                     Some(task_id_clone.clone()),
                     format!("用户取消恢复: {}", task_id_clone),
                 );
@@ -188,7 +206,7 @@ pub async fn start_recovery(
                 // 记录恢复出错审计事件
                 let _ = audit_service::log_audit_event(
                     &db,
-                    AuditEventType::TaskFailed,
+                    AuditEventType::RecoveryFailed,
                     Some(task_id_clone.clone()),
                     format!("恢复出错: {} - {}", task_id_clone, err),
                 );

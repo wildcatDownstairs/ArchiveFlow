@@ -24,7 +24,7 @@ export async function deleteTask(taskId: string): Promise<void> {
 
 export async function updateTaskStatus(
   taskId: string,
-  status: string,
+  status: Task["status"],
   errorMessage?: string | null,
 ): Promise<void> {
   return invoke<void>("update_task_status", { taskId, status, errorMessage })

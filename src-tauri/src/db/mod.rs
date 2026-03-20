@@ -25,7 +25,7 @@ impl Database {
                 file_name TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 archive_type TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'imported',
+                status TEXT NOT NULL DEFAULT 'ready',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 error_message TEXT,
@@ -67,10 +67,57 @@ impl Database {
             log::info!("数据库迁移: 已添加 found_password 列");
         }
 
+        Self::normalize_task_statuses(&conn)?;
+
         log::info!("数据库初始化完成: {:?}", db_path);
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    fn normalize_task_statuses(conn: &Connection) -> Result<(), rusqlite::Error> {
+        let updates = [
+            (
+                "processing",
+                "UPDATE tasks SET status = 'processing' WHERE status = 'verifying'",
+            ),
+            (
+                "cancelled",
+                "UPDATE tasks SET status = 'cancelled' WHERE status = 'cleaned'",
+            ),
+            (
+                "ready",
+                "UPDATE tasks SET status = 'ready'
+                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
+                 AND archive_type IN ('zip', 'sevenz', 'rar')
+                 AND archive_info IS NOT NULL",
+            ),
+            (
+                "unsupported",
+                "UPDATE tasks SET status = 'unsupported'
+                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
+                 AND archive_type = 'unknown'
+                 AND error_message IS NULL",
+            ),
+            (
+                "failed",
+                "UPDATE tasks SET status = 'failed'
+                 WHERE status IN ('imported', 'inspecting', 'waiting_authorization')
+                 AND (
+                    (archive_type IN ('zip', 'sevenz', 'rar') AND archive_info IS NULL)
+                    OR (archive_type = 'unknown' AND error_message IS NOT NULL)
+                 )",
+            ),
+        ];
+
+        for (normalized, sql) in updates {
+            let affected = conn.execute(sql, [])?;
+            if affected > 0 {
+                log::info!("数据库状态正规化: {} 条任务 -> {}", affected, normalized);
+            }
+        }
+
+        Ok(())
     }
 
     /// 从 row 解析 Task（共享逻辑）
@@ -87,8 +134,12 @@ impl Database {
         let archive_type: ArchiveType =
             serde_json::from_value(serde_json::Value::String(archive_type_str))
                 .unwrap_or(ArchiveType::Unknown);
-        let status: TaskStatus = serde_json::from_value(serde_json::Value::String(status_str))
-            .unwrap_or(TaskStatus::Imported);
+        let status = TaskStatus::normalize_persisted(
+            &status_str,
+            &archive_type,
+            error_message.as_deref(),
+            archive_info_json.is_some(),
+        );
         let created_at: DateTime<Utc> = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -117,10 +168,7 @@ impl Database {
     /// 插入新任务
     pub fn insert_task(&self, task: &Task) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
-        let status_str = serde_json::to_value(&task.status)?
-            .as_str()
-            .unwrap()
-            .to_string();
+        let status_str = task.status.as_str().to_string();
         let archive_type_str = serde_json::to_value(&task.archive_type)?
             .as_str()
             .unwrap()
@@ -266,9 +314,8 @@ impl Database {
         let event_type_str: String = row.get(1)?;
         let timestamp_str: String = row.get(4)?;
 
-        let event_type: AuditEventType =
-            serde_json::from_value(serde_json::Value::String(event_type_str))
-                .unwrap_or(AuditEventType::TaskCreated);
+        let event_type = AuditEventType::parse_persisted(&event_type_str)
+            .unwrap_or(AuditEventType::FileImported);
         let timestamp: DateTime<Utc> = DateTime::parse_from_rfc3339(&timestamp_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -285,10 +332,7 @@ impl Database {
     /// 插入审计事件
     pub fn insert_audit_event(&self, event: &AuditEvent) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
-        let event_type_str = serde_json::to_value(&event.event_type)?
-            .as_str()
-            .unwrap()
-            .to_string();
+        let event_type_str = event.event_type.as_str().to_string();
         let timestamp_str = event.timestamp.to_rfc3339();
 
         conn.execute(
@@ -381,7 +425,7 @@ mod tests {
             file_name: format!("{}.zip", id),
             file_size: 1024,
             archive_type: ArchiveType::Zip,
-            status: TaskStatus::Imported,
+            status: TaskStatus::Ready,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             error_message: None,
@@ -452,7 +496,7 @@ mod tests {
         assert_eq!(fetched.file_name, "t1.zip");
         assert_eq!(fetched.file_size, 1024);
         assert_eq!(fetched.archive_type, ArchiveType::Zip);
-        assert_eq!(fetched.status, TaskStatus::Imported);
+        assert_eq!(fetched.status, TaskStatus::Ready);
     }
 
     #[test]
@@ -502,6 +546,61 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, AppError::TaskNotFound(_)));
+    }
+
+    #[test]
+    fn legacy_statuses_are_normalized_on_read() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf()).unwrap();
+        let conn = db.conn.lock().unwrap();
+
+        conn.execute(
+            "INSERT INTO tasks (
+                id, file_path, file_name, file_size, archive_type, status, created_at, updated_at, error_message, found_password, archive_info
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                "legacy-rar",
+                "/tmp/legacy.rar",
+                "legacy.rar",
+                1_i64,
+                "rar",
+                "imported",
+                Utc::now().to_rfc3339(),
+                Utc::now().to_rfc3339(),
+                Option::<String>::None,
+                Option::<String>::None,
+                Option::<String>::None,
+            ],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO tasks (
+                id, file_path, file_name, file_size, archive_type, status, created_at, updated_at, error_message, found_password, archive_info
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                "legacy-verify",
+                "/tmp/legacy.zip",
+                "legacy.zip",
+                1_i64,
+                "zip",
+                "verifying",
+                Utc::now().to_rfc3339(),
+                Utc::now().to_rfc3339(),
+                Option::<String>::None,
+                Option::<String>::None,
+                Some("{\"total_entries\":0,\"total_size\":0,\"is_encrypted\":false,\"has_encrypted_filenames\":false,\"entries\":[]}".to_string()),
+            ],
+        )
+        .unwrap();
+
+        drop(conn);
+
+        let rar = db.get_task_by_id("legacy-rar").unwrap().unwrap();
+        assert_eq!(rar.status, TaskStatus::Failed);
+
+        let verify = db.get_task_by_id("legacy-verify").unwrap().unwrap();
+        assert_eq!(verify.status, TaskStatus::Processing);
     }
 
     #[test]

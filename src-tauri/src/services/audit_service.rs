@@ -74,7 +74,7 @@ mod tests {
         let task_id = "specific-task-42".to_string();
         log_audit_event(
             &db,
-            AuditEventType::TaskStarted,
+            AuditEventType::RecoveryStarted,
             Some(task_id.clone()),
             "Task started".to_string(),
         )

@@ -34,7 +34,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     file_name: "test.zip",
     file_size: 1024,
     archive_type: "zip",
-    status: "imported",
+    status: "ready",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
     error_message: null,
@@ -159,7 +159,7 @@ describe("taskStore", () => {
 
   describe("updateTaskStatus", () => {
     it("updates the status of a task in the list", async () => {
-      const t1 = makeTask({ id: "t1", status: "imported" })
+      const t1 = makeTask({ id: "t1", status: "ready" })
       useTaskStore.setState({ tasks: [t1] })
 
       mockedApi.updateTaskStatus.mockResolvedValue(undefined)

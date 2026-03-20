@@ -57,7 +57,7 @@ export default function RecoveryPanel({
   // 恢复状态
   const [progress, setProgress] = useState<RecoveryProgress | null>(null)
   const [isRunning, setIsRunning] = useState(
-    task.status === "processing" || task.status === "verifying",
+    task.status === "processing",
   )
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -179,7 +179,10 @@ export default function RecoveryPanel({
       ? Math.min((progress.tried / progress.total) * 100, 100)
       : 0
 
-  const terminalStatus: Exclude<RecoveryStatus, "running"> | null =
+  const terminalStatus:
+    | Exclude<RecoveryStatus, "running">
+    | "interrupted"
+    | null =
     progress && progress.status !== "running"
       ? progress.status
       : task.status === "succeeded"
@@ -188,6 +191,8 @@ export default function RecoveryPanel({
           ? "exhausted"
           : task.status === "cancelled"
             ? "cancelled"
+            : task.status === "interrupted"
+              ? "interrupted"
             : task.status === "failed"
               ? "error"
               : null
@@ -198,7 +203,7 @@ export default function RecoveryPanel({
 
   // 状态显示
   const statusDisplay: Record<
-    Exclude<RecoveryStatus, "running">,
+    Exclude<RecoveryStatus, "running"> | "interrupted",
     { color: string; icon: typeof Check; label: string }
   > = {
     found: { color: "text-green-600", icon: Check, label: t("password_found") },
@@ -217,6 +222,11 @@ export default function RecoveryPanel({
       icon: AlertCircle,
       label: t("recovery_error"),
     },
+    interrupted: {
+      color: "text-orange-600",
+      icon: AlertCircle,
+      label: t("recovery_interrupted"),
+    },
   }
 
   // 只有加密且状态允许时才显示
@@ -226,7 +236,8 @@ export default function RecoveryPanel({
       task.status === "ready" ||
       task.status === "failed" ||
       task.status === "cancelled" ||
-      task.status === "exhausted"
+      task.status === "exhausted" ||
+      task.status === "interrupted"
     )
 
   return (
@@ -242,18 +253,21 @@ export default function RecoveryPanel({
 
       {/* 结果展示 - 如果找到密码 */}
       {terminalStatus === "found" && displayPassword && (
-        <div className="rounded-lg border-2 border-green-300 bg-green-50 p-4 space-y-2">
+        <div className="rounded-lg border-2 border-green-300 bg-green-50 p-4 space-y-3">
           <div className="flex items-center gap-2 text-green-700 font-medium">
             <Check className="h-5 w-5" />
             {t("password_found")}
           </div>
-          <div className="flex items-center gap-3">
-            <code className="flex-1 rounded bg-white px-3 py-2 text-lg font-mono border border-green-200">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start">
+            <code
+              className="flex-1 rounded border border-green-200 bg-white px-3 py-2 font-mono text-base leading-relaxed break-all text-slate-950 select-all shadow-sm"
+              title={displayPassword}
+            >
               {displayPassword}
             </code>
             <button
               onClick={() => void handleCopy(displayPassword)}
-              className="flex items-center gap-1.5 rounded-md px-3 py-2 text-sm bg-green-600 text-white hover:bg-green-700 transition-colors"
+              className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm bg-green-600 text-white hover:bg-green-700 transition-colors md:self-stretch"
             >
               {copied ? (
                 <Check className="h-4 w-4" />
@@ -281,6 +295,8 @@ export default function RecoveryPanel({
               terminalStatus === "exhausted" &&
                 "border-yellow-200 bg-yellow-50",
               terminalStatus === "cancelled" && "border-gray-200 bg-gray-50",
+              terminalStatus === "interrupted" &&
+                "border-orange-200 bg-orange-50",
               terminalStatus === "error" && "border-red-200 bg-red-50",
             )}
           >

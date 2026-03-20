@@ -1,8 +1,8 @@
 use tauri::{command, State};
 
 use crate::db::Database;
-use crate::domain::audit::AuditEventType;
 use crate::domain::audit::AuditEvent;
+use crate::domain::audit::AuditEventType;
 use crate::errors::AppError;
 use crate::services::audit_service;
 

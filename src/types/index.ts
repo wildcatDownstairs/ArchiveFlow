@@ -5,17 +5,14 @@ export interface Task {
   file_size: number
   archive_type: "zip" | "sevenz" | "rar" | "unknown"
   status:
-    | "imported"
-    | "inspecting"
-    | "waiting_authorization"
     | "ready"
     | "processing"
-    | "verifying"
     | "succeeded"
     | "exhausted"
     | "cancelled"
     | "failed"
-    | "cleaned"
+    | "unsupported"
+    | "interrupted"
   created_at: string
   updated_at: string
   error_message: string | null
@@ -44,12 +41,16 @@ export interface ArchiveInfo {
 
 export type AuditEventType =
   | "file_imported"
-  | "task_created"
   | "task_deleted"
   | "tasks_cleared"
-  | "task_started"
-  | "task_completed"
   | "task_failed"
+  | "task_unsupported"
+  | "task_interrupted"
+  | "recovery_started"
+  | "recovery_succeeded"
+  | "recovery_exhausted"
+  | "recovery_cancelled"
+  | "recovery_failed"
   | "audit_logs_cleared"
   | "authorization_granted"
   | "result_exported"
