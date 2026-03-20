@@ -51,6 +51,9 @@ const EXPORTABLE_STATUSES: Task["status"][] = [
   "interrupted",
 ]
 
+const EXPORT_BUTTON_CLASS_NAME =
+  "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+
 function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -205,18 +208,18 @@ export default function TaskDetailPage() {
             <>
               <button
                 onClick={() => void handleExport("json")}
-                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+                className={EXPORT_BUTTON_CLASS_NAME}
                 title={t("export_results") + " (JSON)"}
               >
-                <Download className="h-4 w-4" />
+                <Download className="h-4 w-4 text-amber-500" />
                 JSON
               </button>
               <button
                 onClick={() => void handleExport("csv")}
-                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+                className={EXPORT_BUTTON_CLASS_NAME}
                 title={t("export_results") + " (CSV)"}
               >
-                <Download className="h-4 w-4" />
+                <Download className="h-4 w-4 text-amber-500" />
                 CSV
               </button>
             </>

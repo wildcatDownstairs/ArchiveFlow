@@ -159,7 +159,7 @@ export default function ReportPage() {
                   <td className="px-4 py-3">
                     <span
                       className={cn(
-                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                        "inline-flex min-w-[5.5rem] items-center justify-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap",
                         EVENT_BADGE_COLORS[event.event_type],
                       )}
                     >

@@ -56,6 +56,8 @@ export default function TaskPage() {
   }
 
   const exportableTasks = tasks.filter((task) => EXPORTABLE_STATUSES.includes(task.status))
+  const exportButtonClassName =
+    "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
 
   const handleExportAll = async (format: ExportFormat) => {
     if (exportableTasks.length === 0) {
@@ -104,18 +106,18 @@ export default function TaskPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => void handleExportAll("json")}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+              className={exportButtonClassName}
               title={t("export_all") + " (JSON)"}
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4 text-amber-500" />
               {t("export_all")} JSON
             </button>
             <button
               onClick={() => void handleExportAll("csv")}
-              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+              className={exportButtonClassName}
               title={t("export_all") + " (CSV)"}
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4 text-amber-500" />
               {t("export_all")} CSV
             </button>
           </div>

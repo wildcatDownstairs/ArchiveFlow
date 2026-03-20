@@ -5,8 +5,8 @@
   "identifier": "com.archiveflow.app",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:3210",
+    "beforeDevCommand": "node scripts/tauri-dev-server.mjs",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
