@@ -63,10 +63,7 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<(), MigrationError> {
     if is_database_empty(&tx)? {
         create_latest_schema(&tx)?;
         set_user_version(&tx, CURRENT_SCHEMA_VERSION)?;
-        log::info!(
-            "数据库初始化完成: schema v{}",
-            CURRENT_SCHEMA_VERSION
-        );
+        log::info!("数据库初始化完成: schema v{}", CURRENT_SCHEMA_VERSION);
     } else {
         let mut version = detected_version;
         while version < CURRENT_SCHEMA_VERSION {
@@ -125,7 +122,7 @@ fn apply_migration(conn: &Connection, target_version: u32) -> Result<(), rusqlit
         2 => migrate_to_v2(conn),
         3 => migrate_to_v3(conn),
         4 => migrate_to_v4(conn),
-        _ => Ok(()),
+        v => unreachable!("未注册的迁移版本 v{v}；请在 apply_migration 中添加对应分支"),
     }
 }
 
@@ -144,8 +141,6 @@ fn migrate_to_v1(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn migrate_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
-    migrate_to_v1(conn)?;
-
     if !column_exists(conn, "tasks", "found_password")? {
         conn.execute("ALTER TABLE tasks ADD COLUMN found_password TEXT", [])?;
         log::info!("数据库迁移: 已添加 tasks.found_password");
@@ -155,8 +150,6 @@ fn migrate_to_v2(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn migrate_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
-    migrate_to_v2(conn)?;
-
     if !column_exists(conn, "tasks", "archive_info")? {
         conn.execute("ALTER TABLE tasks ADD COLUMN archive_info TEXT", [])?;
         log::info!("数据库迁移: 已添加 tasks.archive_info");
@@ -166,7 +159,6 @@ fn migrate_to_v3(conn: &Connection) -> Result<(), rusqlite::Error> {
 }
 
 fn migrate_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
-    migrate_to_v3(conn)?;
     normalize_task_statuses(conn)?;
     Ok(())
 }
