@@ -331,17 +331,15 @@ fn shard_passwords(
     mode: &AttackMode,
     shard_start: u64,
     shard_end: u64,
-) -> Box<dyn Iterator<Item = String> + Send> {
+) -> Box<dyn Iterator<Item = String> + Send + '_> {
     match mode {
-        AttackMode::Dictionary { wordlist } => {
-            let words: Vec<String> = wordlist
+        AttackMode::Dictionary { wordlist } => Box::new(
+            wordlist
                 .iter()
                 .skip(shard_start as usize)
                 .take((shard_end - shard_start) as usize)
-                .cloned()
-                .collect();
-            Box::new(words.into_iter())
-        }
+                .cloned(),
+        ),
         AttackMode::BruteForce {
             charset,
             min_length,
@@ -429,11 +427,16 @@ fn format_worker_panic_error(panic_messages: &[String]) -> String {
     )
 }
 
+fn create_result_channel<T>(num_workers: u64) -> (mpsc::SyncSender<T>, mpsc::Receiver<T>) {
+    let capacity = usize::try_from(num_workers).unwrap_or(usize::MAX).max(1);
+    mpsc::sync_channel(capacity)
+}
+
 /// A single worker shard for ZIP archives.
 /// Opens its own ZipArchive (ZipArchive is not Send, must be per-thread).
 fn run_zip_worker_shard(
     path: PathBuf,
-    mode: AttackMode,
+    mode: Arc<AttackMode>,
     shard_start: u64,
     shard_end: u64,
     cancel_flag: Arc<AtomicBool>,
@@ -469,7 +472,7 @@ fn run_zip_worker_shard(
 fn run_stateless_worker_shard(
     path: PathBuf,
     archive_type: ArchiveType,
-    mode: AttackMode,
+    mode: Arc<AttackMode>,
     shard_start: u64,
     shard_end: u64,
     cancel_flag: Arc<AtomicBool>,
@@ -528,11 +531,13 @@ pub fn run_recovery(
         return Err(format!("文件不存在: {}", file_path));
     }
     let path_buf = path.to_path_buf();
+    let task_id = config.task_id.clone();
+    let mode = Arc::new(config.mode);
 
     validate_recovery_target(path, &archive_type)?;
 
     // Compute total candidates and determine shard boundaries
-    let total = match &config.mode {
+    let total = match mode.as_ref() {
         AttackMode::Dictionary { wordlist } => wordlist.len() as u64,
         AttackMode::BruteForce {
             charset,
@@ -567,7 +572,7 @@ pub fn run_recovery(
 
     log::info!(
         "开始并行恢复: task={}, workers={}, total={}, archive_type={:?}",
-        config.task_id,
+        task_id,
         num_workers,
         total,
         archive_type
@@ -575,10 +580,9 @@ pub fn run_recovery(
 
     // Shared state
     let tried_counter = Arc::new(AtomicU64::new(0));
-    let (result_tx, result_rx) = mpsc::sync_channel::<String>(1);
+    let (result_tx, result_rx) = create_result_channel::<String>(num_workers);
 
     // Emit initial progress
-    let task_id = config.task_id.clone();
     let start_time = Instant::now();
     let _ = app_handle.emit(
         "recovery-progress",
@@ -597,7 +601,7 @@ pub fn run_recovery(
     let mut handles = Some(Vec::new());
     for (shard_start, shard_end) in shards {
         let path_clone = path_buf.clone();
-        let mode_clone = config.mode.clone();
+        let mode_clone = Arc::clone(&mode);
         let cancel_clone = Arc::clone(&cancel_flag);
         let tried_clone = Arc::clone(&tried_counter);
         let tx_clone = result_tx.clone();
@@ -978,6 +982,37 @@ mod tests {
         assert!(panic_messages[0].contains("boom"));
     }
 
+    #[test]
+    fn result_channel_buffers_one_hit_per_worker() {
+        let (tx, rx) = create_result_channel::<String>(3);
+
+        let handles: Vec<_> = ["pw1", "pw2", "pw3"]
+            .into_iter()
+            .map(|password| {
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    tx.send(password.to_string()).unwrap();
+                })
+            })
+            .collect();
+        drop(tx);
+
+        let mut results = Vec::new();
+        for _ in 0..3 {
+            results.push(
+                rx.recv_timeout(std::time::Duration::from_secs(1))
+                    .expect("all worker hits should fit into the result channel"),
+            );
+        }
+        results.sort();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(results, vec!["pw1", "pw2", "pw3"]);
+    }
+
     // ─── total_combinations ─────────────────────────────────────────
 
     #[test]
@@ -1164,7 +1199,7 @@ mod tests {
             ],
         };
 
-        run_zip_worker_shard(path, mode, 0, 5, cancel, counter.clone(), tx);
+        run_zip_worker_shard(path, Arc::new(mode), 0, 5, cancel, counter.clone(), tx);
 
         let found = rx.recv().expect("should find password");
         assert_eq!(found, "test123");
@@ -1186,7 +1221,16 @@ mod tests {
             ],
         };
 
-        run_stateless_worker_shard(path, ArchiveType::SevenZ, mode, 0, 3, cancel, counter, tx);
+        run_stateless_worker_shard(
+            path,
+            ArchiveType::SevenZ,
+            Arc::new(mode),
+            0,
+            3,
+            cancel,
+            counter,
+            tx,
+        );
 
         let found = rx.recv().expect("should find password");
         assert_eq!(found, "test123");
@@ -1207,7 +1251,16 @@ mod tests {
             ],
         };
 
-        run_stateless_worker_shard(path, ArchiveType::Rar, mode, 0, 3, cancel, counter, tx);
+        run_stateless_worker_shard(
+            path,
+            ArchiveType::Rar,
+            Arc::new(mode),
+            0,
+            3,
+            cancel,
+            counter,
+            tx,
+        );
 
         let found = rx.recv().expect("should find password");
         assert_eq!(found, "unrar");
@@ -1224,7 +1277,7 @@ mod tests {
             wordlist: vec!["test123".to_string()],
         };
 
-        run_zip_worker_shard(path, mode, 0, 1, cancel, counter, tx);
+        run_zip_worker_shard(path, Arc::new(mode), 0, 1, cancel, counter, tx);
 
         // Channel should be empty — worker exited early without trying
         assert!(rx.try_recv().is_err());
@@ -1246,13 +1299,13 @@ mod tests {
             "w5".to_string(),
             "test123".to_string(),
         ];
-        let mode = AttackMode::Dictionary { wordlist: words };
+        let mode = Arc::new(AttackMode::Dictionary { wordlist: words });
 
         // Spawn 3 workers: shards [0,2), [2,4), [4,6)
         let mut handles = vec![];
         for (s, e) in [(0u64, 2u64), (2, 4), (4, 6)] {
             let p = path.clone();
-            let m = mode.clone();
+            let m = Arc::clone(&mode);
             let c = Arc::clone(&cancel);
             let t = Arc::clone(&counter);
             let tx2 = tx.clone();
