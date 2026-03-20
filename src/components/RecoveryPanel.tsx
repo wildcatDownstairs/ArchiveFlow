@@ -9,9 +9,13 @@ import {
   Zap,
   BookOpen,
   AlertCircle,
+  FileUp,
 } from "lucide-react"
+import { open } from "@tauri-apps/plugin-dialog"
+import { readTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { formatElapsed } from "@/lib/format"
+import { buildDictionaryCandidates } from "@/lib/recoveryCandidates"
 import * as api from "@/services/api"
 import type { RecoveryProgress, RecoveryStatus, Task } from "@/types"
 
@@ -23,7 +27,7 @@ const CHARSETS = {
   special: "!@#$%^&*()_+-=[]{}|;:',.<>?/~`\"\\",
 }
 
-type AttackTab = "dictionary" | "bruteforce"
+type AttackTab = "dictionary" | "bruteforce" | "mask"
 
 interface RecoveryPanelProps {
   task: Task
@@ -41,6 +45,14 @@ export default function RecoveryPanel({
 
   // 字典模式配置
   const [wordlistText, setWordlistText] = useState("")
+  const [dictionaryOptions, setDictionaryOptions] = useState({
+    uppercase: false,
+    capitalize: true,
+    leetspeak: false,
+    commonSuffixes: true,
+    combineWords: false,
+    includeFilenamePatterns: false,
+  })
 
   // 暴力破解配置
   const [charsetFlags, setCharsetFlags] = useState({
@@ -53,6 +65,7 @@ export default function RecoveryPanel({
   const [useCustomCharset, setUseCustomCharset] = useState(false)
   const [minLength, setMinLength] = useState(1)
   const [maxLength, setMaxLength] = useState(4)
+  const [maskPattern, setMaskPattern] = useState("?d?d?d?d")
 
   // 恢复状态
   const [progress, setProgress] = useState<RecoveryProgress | null>(null)
@@ -106,6 +119,21 @@ export default function RecoveryPanel({
     return charset
   }, [charsetFlags, customCharset, useCustomCharset])
 
+  const handleImportDictionaryFile = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Text", extensions: ["txt", "dic", "lst"] }],
+      })
+      if (!selected || Array.isArray(selected)) return
+
+      const content = await readTextFile(selected)
+      setWordlistText((prev) => [prev, content].filter(Boolean).join(prev ? "\n" : ""))
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
   // 开始恢复
   const handleStart = async () => {
     setError(null)
@@ -117,16 +145,21 @@ export default function RecoveryPanel({
           .split("\n")
           .map((l) => l.trim())
           .filter(Boolean)
-        if (lines.length === 0) {
+        const candidates = buildDictionaryCandidates(
+          lines,
+          task.file_name,
+          dictionaryOptions,
+        )
+        if (candidates.length === 0) {
           setError(t("dictionary_empty"))
           return
         }
         await api.startRecovery(
           task.id,
           "dictionary",
-          JSON.stringify({ wordlist: lines }),
+          JSON.stringify({ wordlist: candidates }),
         )
-      } else {
+      } else if (activeTab === "bruteforce") {
         const charset = buildCharset()
         if (charset.length === 0) {
           setError(t("charset_empty"))
@@ -143,6 +176,18 @@ export default function RecoveryPanel({
             charset,
             min_length: minLength,
             max_length: maxLength,
+          }),
+        )
+      } else {
+        if (!maskPattern.trim()) {
+          setError(t("mask_empty"))
+          return
+        }
+        await api.startRecovery(
+          task.id,
+          "mask",
+          JSON.stringify({
+            mask: maskPattern.trim(),
           }),
         )
       }
@@ -413,13 +458,37 @@ export default function RecoveryPanel({
               <Zap className="h-4 w-4" />
               {t("bruteforce_attack")}
             </button>
+            <button
+              onClick={() => setActiveTab("mask")}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                activeTab === "mask"
+                  ? "border-indigo-500 text-indigo-600"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <KeyRound className="h-4 w-4" />
+              {t("mask_attack")}
+            </button>
           </div>
 
           {/* 字典模式 */}
           {activeTab === "dictionary" && (
-            <div className="space-y-2">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <label className="text-sm text-muted-foreground">
+                  {t("dictionary_hint")}
+                </label>
+                <button
+                  onClick={() => void handleImportDictionaryFile()}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
+                >
+                  <FileUp className="h-3.5 w-3.5" />
+                  {t("import_dictionary_file")}
+                </button>
+              </div>
               <label className="text-sm text-muted-foreground">
-                {t("dictionary_hint")}
+                {t("dictionary_generation_hint")}
               </label>
               <textarea
                 value={wordlistText}
@@ -437,6 +506,33 @@ export default function RecoveryPanel({
                 }{" "}
                 {t("items")}
               </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                {(
+                  [
+                    ["capitalize", t("transform_capitalize")],
+                    ["uppercase", t("transform_uppercase")],
+                    ["leetspeak", t("transform_leetspeak")],
+                    ["commonSuffixes", t("transform_common_suffixes")],
+                    ["combineWords", t("combine_dictionary")],
+                    ["includeFilenamePatterns", t("include_filename_patterns")],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={dictionaryOptions[key]}
+                      onChange={(e) =>
+                        setDictionaryOptions((prev) => ({
+                          ...prev,
+                          [key]: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-gray-300"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 
@@ -533,6 +629,24 @@ export default function RecoveryPanel({
                     className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "mask" && (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">{t("mask_pattern")}</label>
+                <input
+                  type="text"
+                  value={maskPattern}
+                  onChange={(e) => setMaskPattern(e.target.value)}
+                  placeholder={t("mask_placeholder")}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("mask_hint")}
+                </p>
               </div>
             </div>
           )}

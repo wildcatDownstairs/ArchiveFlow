@@ -321,6 +321,137 @@ pub fn generate_bruteforce_passwords(
     BruteForceIterator::new(charset, min_len, max_len)
 }
 
+const MASK_LOWERCASE: &str = "abcdefghijklmnopqrstuvwxyz";
+const MASK_UPPERCASE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const MASK_DIGITS: &str = "0123456789";
+const MASK_SPECIAL: &str = "!@#$%^&*()_+-=[]{}|;:',.<>?/~`\"\\";
+const MASK_ALL: &str = concat!(
+    "abcdefghijklmnopqrstuvwxyz",
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "0123456789",
+    "!@#$%^&*()_+-=[]{}|;:',.<>?/~`\"\\"
+);
+
+fn parse_mask(mask: &str) -> Result<Vec<Vec<char>>, String> {
+    if mask.is_empty() {
+        return Err("掩码不能为空".to_string());
+    }
+
+    let chars: Vec<char> = mask.chars().collect();
+    let mut slots = Vec::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '?' {
+            let Some(token) = chars.get(index + 1) else {
+                return Err("掩码以未完成的 ? 结尾".to_string());
+            };
+            let charset = match token {
+                'l' => MASK_LOWERCASE.chars().collect(),
+                'u' => MASK_UPPERCASE.chars().collect(),
+                'd' => MASK_DIGITS.chars().collect(),
+                's' => MASK_SPECIAL.chars().collect(),
+                'a' => MASK_ALL.chars().collect(),
+                '?' => vec!['?'],
+                _ => {
+                    return Err(format!("不支持的掩码标记: ?{}", token));
+                }
+            };
+            slots.push(charset);
+            index += 2;
+        } else {
+            slots.push(vec![chars[index]]);
+            index += 1;
+        }
+    }
+
+    if slots.is_empty() {
+        return Err("掩码至少需要一个位置".to_string());
+    }
+
+    Ok(slots)
+}
+
+pub struct MaskIterator {
+    charsets: Vec<Vec<char>>,
+    indices: Vec<usize>,
+    done: bool,
+}
+
+impl MaskIterator {
+    pub fn new(mask: &str) -> Result<Self, String> {
+        let charsets = parse_mask(mask)?;
+        let indices = vec![0; charsets.len()];
+        Ok(Self {
+            charsets,
+            indices,
+            done: false,
+        })
+    }
+
+    pub fn total_combinations(mask: &str) -> Result<u64, String> {
+        let charsets = parse_mask(mask)?;
+        Ok(charsets.iter().fold(1_u64, |total, charset| {
+            total.saturating_mul(charset.len() as u64)
+        }))
+    }
+
+    pub fn skip_to(&mut self, mut n: u64) {
+        if self.done {
+            return;
+        }
+
+        let total = self.charsets.iter().fold(1_u64, |total, charset| {
+            total.saturating_mul(charset.len() as u64)
+        });
+        if n >= total {
+            self.done = true;
+            return;
+        }
+
+        for i in (0..self.charsets.len()).rev() {
+            let base = self.charsets[i].len() as u64;
+            self.indices[i] = (n % base) as usize;
+            n /= base;
+        }
+    }
+}
+
+impl Iterator for MaskIterator {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done {
+            return None;
+        }
+
+        let password: String = self
+            .indices
+            .iter()
+            .enumerate()
+            .map(|(i, &index)| self.charsets[i][index])
+            .collect();
+
+        let mut carry = true;
+        for i in (0..self.indices.len()).rev() {
+            if carry {
+                self.indices[i] += 1;
+                if self.indices[i] >= self.charsets[i].len() {
+                    self.indices[i] = 0;
+                } else {
+                    carry = false;
+                }
+            }
+        }
+
+        if carry {
+            self.done = true;
+        }
+
+        Some(password)
+    }
+}
+
 // ─── 并行 Worker ──────────────────────────────────────────────────
 
 /// Worker 每处理这么多密码后刷新一次 tried_counter 并检查取消标志
@@ -346,6 +477,12 @@ fn shard_passwords(
             max_length,
         } => {
             let mut iter = BruteForceIterator::new(charset, *min_length, *max_length);
+            iter.skip_to(shard_start);
+            Box::new(iter.take((shard_end - shard_start) as usize))
+        }
+        AttackMode::Mask { mask } => {
+            let mut iter = MaskIterator::new(mask)
+                .expect("mask mode should be validated before worker sharding");
             iter.skip_to(shard_start);
             Box::new(iter.take((shard_end - shard_start) as usize))
         }
@@ -548,6 +685,7 @@ pub fn run_recovery(
             *min_length,
             *max_length,
         ),
+        AttackMode::Mask { mask } => MaskIterator::total_combinations(mask)?,
     };
 
     let num_workers = {
@@ -949,6 +1087,48 @@ mod tests {
         let shard_1: Vec<String> = shard_passwords(&mode, 2, 5).collect();
         assert_eq!(shard_0, vec!["a", "b"]);
         assert_eq!(shard_1, vec!["c", "d", "e"]);
+    }
+
+    #[test]
+    fn parse_mask_supports_literals_and_tokens() {
+        let slots = parse_mask("?dA??").unwrap();
+        assert_eq!(slots.len(), 3);
+        assert_eq!(slots[0].len(), 10);
+        assert_eq!(slots[1], vec!['A']);
+        assert_eq!(slots[2], vec!['?']);
+    }
+
+    #[test]
+    fn mask_iterator_generates_expected_sequence() {
+        let items: Vec<String> = MaskIterator::new("?dA").unwrap().collect();
+        assert_eq!(items.first().unwrap(), "0A");
+        assert_eq!(items.last().unwrap(), "9A");
+        assert_eq!(items.len(), 10);
+    }
+
+    #[test]
+    fn mask_iterator_skip_to_matches_sequence() {
+        let full: Vec<String> = MaskIterator::new("?l?d").unwrap().collect();
+        let mut iter = MaskIterator::new("?l?d").unwrap();
+        iter.skip_to(13);
+        let rest: Vec<String> = iter.collect();
+        assert_eq!(&full[13..], &rest[..]);
+    }
+
+    #[test]
+    fn total_combinations_for_mask_is_correct() {
+        assert_eq!(MaskIterator::total_combinations("?d?dA").unwrap(), 100);
+    }
+
+    #[test]
+    fn shard_passwords_mask_covers_full_space() {
+        let mode = AttackMode::Mask {
+            mask: "?d?d".to_string(),
+        };
+        let shard_0: Vec<String> = shard_passwords(&mode, 0, 50).collect();
+        let shard_1: Vec<String> = shard_passwords(&mode, 50, 100).collect();
+        let full: Vec<String> = MaskIterator::new("?d?d").unwrap().collect();
+        assert_eq!([shard_0, shard_1].concat(), full);
     }
 
     #[test]

@@ -30,6 +30,7 @@ fn describe_attack_mode(mode: &AttackMode) -> String {
             min_length,
             max_length
         ),
+        AttackMode::Mask { mask } => format!("掩码攻击 (模式: {})", mask),
     }
 }
 
@@ -127,6 +128,17 @@ pub async fn start_recovery(
                 min_length: cfg.min_length,
                 max_length: cfg.max_length,
             }
+        }
+        "mask" => {
+            #[derive(serde::Deserialize)]
+            struct MaskConfig {
+                mask: String,
+            }
+            let cfg: MaskConfig = serde_json::from_str(&config_json)?;
+            if cfg.mask.trim().is_empty() {
+                return Err(AppError::InvalidArgument("掩码不能为空".to_string()));
+            }
+            AttackMode::Mask { mask: cfg.mask }
         }
         _ => {
             return Err(AppError::InvalidArgument(format!(
@@ -287,6 +299,14 @@ mod tests {
             describe_attack_mode(&mode),
             "暴力破解 (字符集长度: 6, 长度范围: 2-5)"
         );
+    }
+
+    #[test]
+    fn describe_mask_attack_mode() {
+        let mode = AttackMode::Mask {
+            mask: "?d?dAB".into(),
+        };
+        assert_eq!(describe_attack_mode(&mode), "掩码攻击 (模式: ?d?dAB)");
     }
 }
 

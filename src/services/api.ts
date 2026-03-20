@@ -50,7 +50,7 @@ export async function importArchive(
 /// 启动密码恢复
 export async function startRecovery(
   taskId: string,
-  mode: "dictionary" | "bruteforce",
+  mode: "dictionary" | "bruteforce" | "mask",
   configJson: string,
 ): Promise<void> {
   return invoke<void>("start_recovery", { taskId, mode, configJson })

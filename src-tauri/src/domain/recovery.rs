@@ -15,6 +15,8 @@ pub enum AttackMode {
         min_length: usize,
         max_length: usize,
     },
+    /// 掩码攻击：按位置语法穷举，支持 ?l ?u ?d ?s ?a 和 ??
+    Mask { mask: String },
 }
 
 /// 恢复任务配置
