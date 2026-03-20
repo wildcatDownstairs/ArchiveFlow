@@ -13,13 +13,17 @@ import {
   Files,
   ShieldCheck,
   ShieldAlert,
+  Download,
 } from "lucide-react"
+import { save } from "@tauri-apps/plugin-dialog"
+import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatFileSize, formatDateTime } from "@/lib/format"
 import { buildFileTree, type TreeNode } from "@/lib/fileTree"
+import { exportTasks } from "@/services/api"
 import RecoveryPanel from "@/components/RecoveryPanel"
-import type { Task } from "@/types"
+import type { Task, ExportFormat } from "@/types"
 
 const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   ready: "bg-cyan-100 text-cyan-800",
@@ -38,6 +42,14 @@ const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
   rar: "bg-orange-100 text-orange-800",
   unknown: "bg-gray-100 text-gray-800",
 }
+
+const EXPORTABLE_STATUSES: Task["status"][] = [
+  "succeeded",
+  "exhausted",
+  "cancelled",
+  "failed",
+  "interrupted",
+]
 
 function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string }) {
   const [expanded, setExpanded] = useState(true)
@@ -122,6 +134,32 @@ export default function TaskDetailPage() {
     }
   }
 
+  const handleExport = async (format: ExportFormat) => {
+    if (!currentTask) return
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace("T", "-")
+      .slice(0, 15)
+    const defaultName = `archiveflow-export-${timestamp}.${format}`
+    const ext = format === "csv" ? "csv" : "json"
+
+    const filePath = await save({
+      defaultPath: defaultName,
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+    })
+    if (!filePath) return
+
+    try {
+      const content = await exportTasks([currentTask.id], format)
+      await writeTextFile(filePath, content)
+      window.alert(t("export_success"))
+    } catch (err) {
+      console.error("Export failed:", err)
+      window.alert(t("export_error"))
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6 flex items-center gap-2 text-muted-foreground">
@@ -149,6 +187,7 @@ export default function TaskDetailPage() {
   const task = currentTask
   const info = task.archive_info
   const fileTree = info ? buildFileTree(info.entries) : []
+  const canExportTask = EXPORTABLE_STATUSES.includes(task.status)
 
   return (
     <div className="p-6 space-y-6">
@@ -161,13 +200,35 @@ export default function TaskDetailPage() {
           <ArrowLeft className="h-4 w-4" />
           {t("back_to_tasks")}
         </button>
-        <button
-          onClick={() => void handleDelete()}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors border border-red-200"
-        >
-          <Trash2 className="h-4 w-4" />
-          {t("delete")}
-        </button>
+        <div className="flex items-center gap-2">
+          {canExportTask && (
+            <>
+              <button
+                onClick={() => void handleExport("json")}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+                title={t("export_results") + " (JSON)"}
+              >
+                <Download className="h-4 w-4" />
+                JSON
+              </button>
+              <button
+                onClick={() => void handleExport("csv")}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+                title={t("export_results") + " (CSV)"}
+              >
+                <Download className="h-4 w-4" />
+                CSV
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => void handleDelete()}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors border border-red-200"
+          >
+            <Trash2 className="h-4 w-4" />
+            {t("delete")}
+          </button>
+        </div>
       </div>
 
       {/* 标题 */}

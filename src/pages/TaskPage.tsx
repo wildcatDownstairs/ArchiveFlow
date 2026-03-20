@@ -1,11 +1,14 @@
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { Trash2, FileArchive, Loader2, Lock, Unlock } from "lucide-react"
+import { Trash2, FileArchive, Loader2, Lock, Unlock, Download } from "lucide-react"
+import { save } from "@tauri-apps/plugin-dialog"
+import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatFileSize, formatDateTime } from "@/lib/format"
-import type { Task } from "@/types"
+import { exportTasks } from "@/services/api"
+import type { Task, ExportFormat } from "@/types"
 
 const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
   zip: "bg-blue-100 text-blue-800",
@@ -24,6 +27,14 @@ const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   unsupported: "bg-slate-200 text-slate-800",
   interrupted: "bg-orange-100 text-orange-800",
 }
+
+const EXPORTABLE_STATUSES: Task["status"][] = [
+  "succeeded",
+  "exhausted",
+  "cancelled",
+  "failed",
+  "interrupted",
+]
 
 export default function TaskPage() {
   const { t } = useTranslation()
@@ -44,6 +55,38 @@ export default function TaskPage() {
     }
   }
 
+  const exportableTasks = tasks.filter((task) => EXPORTABLE_STATUSES.includes(task.status))
+
+  const handleExportAll = async (format: ExportFormat) => {
+    if (exportableTasks.length === 0) {
+      window.alert(t("export_no_tasks"))
+      return
+    }
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace("T", "-")
+      .slice(0, 15)
+    const defaultName = `archiveflow-export-${timestamp}.${format}`
+    const ext = format === "csv" ? "csv" : "json"
+
+    const filePath = await save({
+      defaultPath: defaultName,
+      filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+    })
+    if (!filePath) return
+
+    try {
+      const ids = exportableTasks.map((t) => t.id)
+      const content = await exportTasks(ids, format)
+      await writeTextFile(filePath, content)
+      window.alert(t("export_success"))
+    } catch (err) {
+      console.error("Export failed:", err)
+      window.alert(t("export_error"))
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6 flex items-center gap-2 text-muted-foreground">
@@ -55,7 +98,29 @@ export default function TaskPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">{t("tasks")}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">{t("tasks")}</h1>
+        {exportableTasks.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => void handleExportAll("json")}
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+              title={t("export_all") + " (JSON)"}
+            >
+              <Download className="h-4 w-4" />
+              {t("export_all")} JSON
+            </button>
+            <button
+              onClick={() => void handleExportAll("csv")}
+              className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 transition-colors border border-blue-200"
+              title={t("export_all") + " (CSV)"}
+            >
+              <Download className="h-4 w-4" />
+              {t("export_all")} CSV
+            </button>
+          </div>
+        )}
+      </div>
 
       {tasks.length === 0 ? (
         <p className="text-muted-foreground">{t("no_tasks")}</p>

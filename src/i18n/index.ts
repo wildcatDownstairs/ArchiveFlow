@@ -137,6 +137,14 @@ const resources = {
       tech_stack: "技术栈",
       github_repo: "GitHub 仓库",
       app_data_dir: "数据目录",
+      // 导出
+      export: "导出",
+      export_results: "导出结果",
+      export_all: "导出全部",
+      export_format: "导出格式",
+      export_success: "导出成功",
+      export_error: "导出失败",
+      export_no_tasks: "没有可导出的任务",
     },
   },
   en: {
@@ -274,6 +282,14 @@ const resources = {
       tech_stack: "Tech Stack",
       github_repo: "GitHub Repository",
       app_data_dir: "Data Directory",
+      // Export
+      export: "Export",
+      export_results: "Export Results",
+      export_all: "Export All",
+      export_format: "Export Format",
+      export_success: "Export Successful",
+      export_error: "Export Failed",
+      export_no_tasks: "No tasks to export",
     },
   },
 }

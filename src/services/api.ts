@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { Task, ArchiveInfo, RecoveryProgress, AuditEvent } from "@/types"
+import type { Task, ArchiveInfo, RecoveryProgress, AuditEvent, ExportFormat } from "@/types"
 
 export async function getTasks(): Promise<Task[]> {
   return invoke<Task[]>("get_tasks")
@@ -108,4 +108,13 @@ export async function recordSettingChange(
 
 export async function getStats(): Promise<[number, number]> {
   return invoke<[number, number]>("get_stats")
+}
+
+// --- Export ---
+
+export async function exportTasks(
+  taskIds: string[],
+  format: ExportFormat,
+): Promise<string> {
+  return invoke<string>("export_tasks", { taskIds, format })
 }

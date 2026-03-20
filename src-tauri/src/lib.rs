@@ -71,6 +71,7 @@ pub fn run() {
             commands::audit_commands::record_setting_change,
             commands::recovery_commands::start_recovery,
             commands::recovery_commands::cancel_recovery,
+            commands::export_commands::export_tasks,
         ])
         .run(tauri::generate_context!())
         .expect("启动 ArchiveFlow 时出错");

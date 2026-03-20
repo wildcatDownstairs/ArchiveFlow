@@ -84,3 +84,5 @@ export interface RecoveryProgress {
   found_password: string | null
   elapsed_seconds: number
 }
+
+export type ExportFormat = "csv" | "json"
