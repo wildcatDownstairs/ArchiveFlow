@@ -31,6 +31,12 @@ export default function BootScreen({ onComplete }: Props) {
     "boot_step_6",
   ] as const
 
+  // Remove the static HTML splash once React has mounted
+  useEffect(() => {
+    const splash = document.getElementById("static-splash")
+    if (splash) splash.classList.add("hidden")
+  }, [])
+
   useEffect(() => {
     if (ran.current) return
     ran.current = true
