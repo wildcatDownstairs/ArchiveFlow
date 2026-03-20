@@ -1,0 +1,235 @@
+import { useState, useEffect, useCallback } from "react"
+import { useNavigate } from "react-router-dom"
+import { useTranslation } from "react-i18next"
+import { Upload, FileArchive, Lock, Unlock } from "lucide-react"
+import { open } from "@tauri-apps/plugin-dialog"
+import { stat } from "@tauri-apps/plugin-fs"
+import { cn } from "@/lib/utils"
+import { useTaskStore } from "@/stores/taskStore"
+import { formatDateTime, formatFileSize, getFileNameFromPath } from "@/lib/format"
+import type { Task } from "@/types"
+
+const ALLOWED_EXTENSIONS = ["zip", "7z", "rar"]
+
+const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
+  zip: "bg-blue-100 text-blue-800",
+  sevenz: "bg-green-100 text-green-800",
+  rar: "bg-orange-100 text-orange-800",
+  unknown: "bg-gray-100 text-gray-800",
+}
+
+const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
+  imported: "bg-blue-100 text-blue-800",
+  inspecting: "bg-yellow-100 text-yellow-800",
+  waiting_authorization: "bg-purple-100 text-purple-800",
+  ready: "bg-cyan-100 text-cyan-800",
+  processing: "bg-indigo-100 text-indigo-800",
+  verifying: "bg-yellow-100 text-yellow-800",
+  succeeded: "bg-green-100 text-green-800",
+  failed: "bg-red-100 text-red-800",
+  cleaned: "bg-gray-100 text-gray-800",
+}
+
+export default function HomePage() {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const { tasks, fetchTasks } = useTaskStore()
+  const importArchive = useTaskStore((s) => s.importArchive)
+
+  const [dragging, setDragging] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void fetchTasks()
+  }, [fetchTasks])
+
+  const handleImport = useCallback(
+    async (filePath: string) => {
+      setImporting(true)
+      setError(null)
+      try {
+        const fileName = getFileNameFromPath(filePath)
+        let fileSize = 0
+        try {
+          const info = await stat(filePath)
+          fileSize = info.size
+        } catch {
+          // stat may fail; backend will read the actual size
+        }
+        const task = await importArchive(filePath, fileName, fileSize)
+        navigate(`/tasks/${task.id}`)
+      } catch (e) {
+        setError(String(e))
+      } finally {
+        setImporting(false)
+      }
+    },
+    [importArchive, navigate],
+  )
+
+  const isAllowedFile = (path: string): boolean => {
+    const ext = path.split(".").pop()?.toLowerCase() ?? ""
+    return ALLOWED_EXTENSIONS.includes(ext)
+  }
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragging(false)
+
+      const files = e.dataTransfer.files
+      if (files.length > 0) {
+        const file = files[0]
+        const filePath = (file as File & { path?: string }).path
+        if (filePath && isAllowedFile(filePath)) {
+          void handleImport(filePath)
+        }
+      }
+    },
+    [handleImport],
+  )
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragging(true)
+    },
+    [],
+  )
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragging(false)
+    },
+    [],
+  )
+
+  const handleClick = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Archives", extensions: ["zip", "7z", "rar"] }],
+      })
+      if (selected) {
+        void handleImport(selected)
+      }
+    } catch {
+      // user cancelled dialog
+    }
+  }, [handleImport])
+
+  const recentTasks = tasks.slice(0, 5)
+
+  return (
+    <div className="p-6 space-y-8">
+      <h1 className="text-2xl font-bold">{t("home")}</h1>
+
+      {/* Drop zone */}
+      <div
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => void handleClick()}
+        className={cn(
+          "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 text-center transition-colors cursor-pointer",
+          dragging
+            ? "border-primary bg-primary/5"
+            : "border-gray-300 hover:border-primary",
+        )}
+      >
+        <Upload
+          className={cn(
+            "h-12 w-12 mb-4 transition-colors",
+            dragging ? "text-primary" : "text-muted-foreground",
+          )}
+        />
+        {importing ? (
+          <p className="text-primary text-lg">{t("importing")}</p>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-lg">{t("drag_hint")}</p>
+            <p className="text-muted-foreground text-sm mt-2">
+              {t("or")}{" "}
+              <span className="text-primary underline">{t("select_file")}</span>
+            </p>
+          </>
+        )}
+      </div>
+
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
+          {t("import_error")}: {error}
+        </div>
+      )}
+
+      {/* Recent tasks */}
+      <section>
+        <h2 className="text-xl font-semibold mb-4">{t("recent_tasks")}</h2>
+        {recentTasks.length === 0 ? (
+          <p className="text-muted-foreground">{t("no_tasks")}</p>
+        ) : (
+          <div className="space-y-2">
+            {recentTasks.map((task) => (
+              <div
+                key={task.id}
+                className="flex items-center gap-4 rounded-lg border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
+                onClick={() => navigate(`/tasks/${task.id}`)}
+              >
+                <FileArchive className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">
+                    {task.file_name}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDateTime(task.created_at)}
+                  </p>
+                </div>
+                {/* 加密状态指示 */}
+                {task.archive_info && (
+                  <div className="flex items-center gap-1 text-xs">
+                    {task.archive_info.is_encrypted ? (
+                      <span className="flex items-center gap-1 text-amber-600">
+                        <Lock className="h-3.5 w-3.5" />
+                        {t("encrypted")}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-green-600">
+                        <Unlock className="h-3.5 w-3.5" />
+                        {t("not_encrypted")}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* 文件大小 */}
+                <span className="text-xs text-muted-foreground">
+                  {formatFileSize(task.file_size)}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    TYPE_BADGE_COLORS[task.archive_type],
+                  )}
+                >
+                  {t(`type_${task.archive_type}`)}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    STATUS_BADGE_COLORS[task.status],
+                  )}
+                >
+                  {t(`status_${task.status}`)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
