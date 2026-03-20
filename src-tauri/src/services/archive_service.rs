@@ -1,10 +1,10 @@
 use crate::domain::archive::{ArchiveEntry, ArchiveInfo};
 use crate::domain::task::ArchiveType;
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read, Seek};
 use std::path::Path;
 
-use sevenz_rust::{Password, SevenZReader};
+use sevenz_rust::{Error as SevenZError, Password, SevenZReader};
 use unrar::Archive as RarArchive;
 
 pub fn detect_archive_type(file_path: &Path) -> Result<ArchiveType, String> {
@@ -82,50 +82,88 @@ pub fn inspect_zip(file_path: &Path) -> Result<ArchiveInfo, String> {
     })
 }
 
-pub fn inspect_7z(file_path: &Path) -> Result<ArchiveInfo, String> {
-    // 先尝试无密码打开
-    match SevenZReader::open(file_path, Password::empty()) {
-        Ok(reader) => {
-            // 无密码打开成功 → 非加密（或仅内容加密但文件头可读）
-            let archive = reader.archive();
-            let mut entries = Vec::new();
-            let mut total_size: u64 = 0;
+fn is_7z_password_error(error: &SevenZError) -> bool {
+    matches!(
+        error,
+        SevenZError::PasswordRequired | SevenZError::MaybeBadPassword(_)
+    )
+}
 
-            for entry in &archive.files {
-                let size = entry.size();
-                total_size += size;
-                entries.push(ArchiveEntry {
-                    path: entry.name().to_string(),
-                    size,
-                    compressed_size: entry.compressed_size,
-                    is_directory: entry.is_directory(),
-                    is_encrypted: false,
-                    last_modified: if entry.has_last_modified_date {
-                        let ts = entry.last_modified_date().to_unix_time();
-                        let dt = chrono::DateTime::from_timestamp(ts, 0);
-                        dt.map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
-                    } else {
-                        None
-                    },
-                });
-            }
+fn collect_7z_entries<R: Read + Seek>(reader: &SevenZReader<R>) -> (Vec<ArchiveEntry>, u64) {
+    let mut entries = Vec::new();
+    let mut total_size: u64 = 0;
 
-            Ok(ArchiveInfo {
-                total_entries: entries.len(),
-                total_size,
-                is_encrypted: false,
-                has_encrypted_filenames: false,
-                entries,
-            })
+    for entry in &reader.archive().files {
+        let size = entry.size();
+        total_size += size;
+        entries.push(ArchiveEntry {
+            path: entry.name().to_string(),
+            size,
+            compressed_size: entry.compressed_size,
+            is_directory: entry.is_directory(),
+            is_encrypted: false,
+            last_modified: if entry.has_last_modified_date {
+                let ts = entry.last_modified_date().to_unix_time();
+                let dt = chrono::DateTime::from_timestamp(ts, 0);
+                dt.map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
+            } else {
+                None
+            },
+        });
+    }
+
+    (entries, total_size)
+}
+
+fn validate_7z_payload<R: Read + Seek>(reader: &mut SevenZReader<R>) -> Result<bool, SevenZError> {
+    let mut validated_any_file = false;
+
+    reader.for_each_entries(|entry, entry_reader| {
+        if entry.is_directory() || !entry.has_stream() {
+            return Ok(true);
         }
-        Err(e) => {
-            let err_str = format!("{}", e);
-            // 检查是否是密码错误（加密的归档）
-            if err_str.contains("PasswordRequired")
-                || err_str.contains("password")
-                || err_str.contains("Password")
-            {
-                // 加密的 7z — 如果文件名也加密了，我们无法获取条目列表
+
+        validated_any_file = true;
+        io::copy(entry_reader, &mut io::sink())?;
+        Ok(true)
+    })?;
+
+    Ok(validated_any_file)
+}
+
+pub fn inspect_7z(file_path: &Path) -> Result<ArchiveInfo, String> {
+    match SevenZReader::open(file_path, Password::empty()) {
+        Ok(mut reader) => {
+            let (mut entries, total_size) = collect_7z_entries(&reader);
+
+            match validate_7z_payload(&mut reader) {
+                Ok(_) => Ok(ArchiveInfo {
+                    total_entries: entries.len(),
+                    total_size,
+                    is_encrypted: false,
+                    has_encrypted_filenames: false,
+                    entries,
+                }),
+                Err(error) if is_7z_password_error(&error) => {
+                    for entry in &mut entries {
+                        if !entry.is_directory {
+                            entry.is_encrypted = true;
+                        }
+                    }
+
+                    Ok(ArchiveInfo {
+                        total_entries: entries.len(),
+                        total_size,
+                        is_encrypted: true,
+                        has_encrypted_filenames: false,
+                        entries,
+                    })
+                }
+                Err(error) => Err(format!("无法解析 7z 文件: {}", error)),
+            }
+        }
+        Err(error) => {
+            if is_7z_password_error(&error) {
                 Ok(ArchiveInfo {
                     total_entries: 0,
                     total_size: 0,
@@ -134,7 +172,7 @@ pub fn inspect_7z(file_path: &Path) -> Result<ArchiveInfo, String> {
                     entries: Vec::new(),
                 })
             } else {
-                Err(format!("无法解析 7z 文件: {}", e))
+                Err(format!("无法解析 7z 文件: {}", error))
             }
         }
     }
@@ -222,6 +260,16 @@ pub fn inspect_archive(file_path: &Path) -> Result<(ArchiveType, Option<ArchiveI
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn make_content_encrypted_7z(password: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("hello.txt");
+        let archive = dir.path().join("content-encrypted.7z");
+        std::fs::write(&source, "secret payload").unwrap();
+        sevenz_rust::compress_to_path_encrypted(&source, &archive, Password::from(password))
+            .unwrap();
+        (dir, archive)
+    }
 
     fn zip_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -331,6 +379,17 @@ mod tests {
         let path = sevenz_fixtures_dir().join("encrypted.7z");
         let info = inspect_7z(&path).unwrap();
         assert!(info.is_encrypted);
+    }
+
+    #[test]
+    fn inspect_content_encrypted_7z_without_encrypted_headers() {
+        let (_dir, path) = make_content_encrypted_7z("test123");
+        let info = inspect_7z(&path).unwrap();
+
+        assert!(info.is_encrypted);
+        assert!(!info.has_encrypted_filenames);
+        assert_eq!(info.total_entries, 1);
+        assert!(info.entries.iter().all(|entry| entry.is_encrypted));
     }
 
     #[test]

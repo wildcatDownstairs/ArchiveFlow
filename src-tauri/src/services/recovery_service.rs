@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use sevenz_rust::{Error as SevenZError, Password, SevenZReader};
 use tauri::Emitter;
 
 use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryProgress, RecoveryStatus};
@@ -68,11 +69,13 @@ pub fn try_password_zip(file_path: &Path, password: &str) -> bool {
 /// 每次调用都会重新打开文件（7z 库不支持复用）。
 /// 返回 true 表示密码正确，false 表示密码错误。
 pub fn try_password_7z(file_path: &Path, password: &str) -> bool {
-    use sevenz_rust::{Password, SevenZReader};
-
     match SevenZReader::open(file_path, Password::from(password)) {
-        Ok(_) => true,   // 成功打开 → 密码正确
-        Err(_) => false, // 打开失败 → 密码错误或其他错误
+        Ok(mut reader) => match validate_7z_payload(&mut reader) {
+            Ok(validated_any_file) => validated_any_file,
+            Err(_) => false,
+        },
+        Err(error) if is_7z_password_error(&error) => false,
+        Err(_) => false,
     }
 }
 
@@ -92,18 +95,51 @@ pub fn try_password_rar(file_path: &Path, password: &str) -> bool {
         Err(_) => return false,
     };
 
-    // 读取第一个文件头
-    let header = match archive.read_header() {
-        Ok(Some(h)) => h,
-        Ok(None) => return false, // 空归档
-        Err(_) => return false,   // 读取头失败（加密头+错误密码）
-    };
+    let mut archive = archive;
+    loop {
+        let entry = match archive.read_header() {
+            Ok(Some(entry)) => entry,
+            Ok(None) => return false,
+            Err(_) => return false,
+        };
 
-    // 尝试读取（解密）文件内容
-    match header.read() {
-        Ok(_) => true,   // 成功读取 → 密码正确
-        Err(_) => false, // 失败 → 密码错误
+        let should_test = {
+            let header = entry.entry();
+            header.is_encrypted() && !header.is_directory()
+        };
+
+        if should_test {
+            return entry.test().is_ok();
+        }
+
+        archive = match entry.skip() {
+            Ok(next) => next,
+            Err(_) => return false,
+        };
     }
+}
+
+fn is_7z_password_error(error: &SevenZError) -> bool {
+    matches!(
+        error,
+        SevenZError::PasswordRequired | SevenZError::MaybeBadPassword(_)
+    )
+}
+
+fn validate_7z_payload<R: Read + Seek>(reader: &mut SevenZReader<R>) -> Result<bool, SevenZError> {
+    let mut validated_any_file = false;
+
+    reader.for_each_entries(|entry, entry_reader| {
+        if entry.is_directory() || !entry.has_stream() {
+            return Ok(true);
+        }
+
+        validated_any_file = true;
+        std::io::copy(entry_reader, &mut std::io::sink())?;
+        Ok(true)
+    })?;
+
+    Ok(validated_any_file)
 }
 
 // ─── 暴力破解密码生成器 ────────────────────────────────────────────
@@ -454,6 +490,16 @@ pub fn run_recovery(
 mod tests {
     use super::*;
 
+    fn make_content_encrypted_7z(password: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("hello.txt");
+        let archive = dir.path().join("content-encrypted.7z");
+        std::fs::write(&source, "secret payload").unwrap();
+        sevenz_rust::compress_to_path_encrypted(&source, &archive, Password::from(password))
+            .unwrap();
+        (dir, archive)
+    }
+
     fn zip_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         manifest_dir.parent().unwrap().join("fixtures").join("zip")
@@ -622,9 +668,15 @@ mod tests {
 
     #[test]
     fn try_password_7z_on_unencrypted_returns_true() {
-        // 非加密 7z 用任何密码都能打开
         let path = sevenz_fixtures_dir().join("normal.7z");
         assert!(try_password_7z(&path, "anything"));
+    }
+
+    #[test]
+    fn try_password_7z_content_encrypted_without_encrypted_headers() {
+        let (_dir, path) = make_content_encrypted_7z("test123");
+        assert!(try_password_7z(&path, "test123"));
+        assert!(!try_password_7z(&path, "wrong_password"));
     }
 
     #[test]
@@ -646,6 +698,12 @@ mod tests {
     fn try_password_rar_wrong() {
         let path = rar_fixtures_dir().join("encrypted.rar");
         assert!(!try_password_rar(&path, "wrong_password"));
+    }
+
+    #[test]
+    fn try_password_rar_on_unencrypted_returns_false() {
+        let path = rar_fixtures_dir().join("normal.rar");
+        assert!(!try_password_rar(&path, "anything"));
     }
 
     #[test]

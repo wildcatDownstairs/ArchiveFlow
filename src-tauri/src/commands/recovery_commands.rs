@@ -8,6 +8,13 @@ use crate::errors::AppError;
 use crate::services::audit_service;
 use crate::services::recovery_service::{self, RecoveryResult};
 
+fn supports_password_recovery(archive_type: &ArchiveType) -> bool {
+    matches!(
+        archive_type,
+        ArchiveType::Zip | ArchiveType::SevenZ | ArchiveType::Rar
+    )
+}
+
 /// 启动密码恢复任务
 ///
 /// - `task_id`: 任务 ID
@@ -29,9 +36,9 @@ pub async fn start_recovery(
         .get_task_by_id(&task_id)?
         .ok_or_else(|| AppError::TaskNotFound(task_id.clone()))?;
 
-    if task.archive_type != ArchiveType::Zip {
+    if !supports_password_recovery(&task.archive_type) {
         return Err(AppError::InvalidArgument(
-            "当前仅支持 ZIP 归档的密码恢复".to_string(),
+            "当前归档类型不支持密码恢复".to_string(),
         ));
     }
 
@@ -218,6 +225,24 @@ pub async fn start_recovery(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supports_password_recovery;
+    use crate::domain::task::ArchiveType;
+
+    #[test]
+    fn password_recovery_supports_zip_7z_and_rar() {
+        assert!(supports_password_recovery(&ArchiveType::Zip));
+        assert!(supports_password_recovery(&ArchiveType::SevenZ));
+        assert!(supports_password_recovery(&ArchiveType::Rar));
+    }
+
+    #[test]
+    fn password_recovery_rejects_unknown_archive_type() {
+        assert!(!supports_password_recovery(&ArchiveType::Unknown));
+    }
 }
 
 /// 取消正在运行的恢复任务
