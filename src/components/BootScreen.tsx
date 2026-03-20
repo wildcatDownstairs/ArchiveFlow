@@ -106,9 +106,9 @@ export default function BootScreen({ onComplete }: Props) {
       />
 
       {/* Content wrapper */}
-      <div style={{ position: "relative", width: "min(520px, 90vw)" }}>
+      <div style={{ position: "relative", width: "min(560px, 90vw)" }}>
         {/* Logo with glitch effect — two pseudo-layers via sibling divs */}
-        <div style={{ position: "relative", marginBottom: "3rem", textAlign: "center" }}>
+        <div style={{ position: "relative", marginBottom: "2.5rem", textAlign: "center" }}>
           {/* Base layer */}
           <div
             style={{
@@ -162,7 +162,7 @@ export default function BootScreen({ onComplete }: Props) {
         </div>
 
         {/* Step list */}
-        <div style={{ marginBottom: "1.75rem", display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+        <div style={{ marginBottom: "1.75rem", display: "flex", flexDirection: "column", gap: "0.55rem" }}>
           {stepKeys.map((key, idx) => {
             const stepNum = idx + 1
             const isDone = currentStep > stepNum
@@ -176,18 +176,18 @@ export default function BootScreen({ onComplete }: Props) {
                   display: "flex",
                   alignItems: "center",
                   gap: "0.6rem",
-                  fontSize: "0.8rem",
-                  opacity: isPending ? 0.3 : isDone ? 0.5 : 1,
+                  fontSize: "0.95rem",
+                  opacity: isPending ? 0.25 : isDone ? 0.65 : 1,
                   transition: "opacity 0.3s",
-                  color: isDone ? "#555" : isActive ? "#00fff7" : "#444",
+                  color: isDone ? "#6a7a7a" : isActive ? "#00fff7" : "#445",
                 }}
               >
-                <span style={{ color: isActive ? "#00fff7" : isDone ? "#333" : "#2a2a2a", width: "1.2rem" }}>
+                <span style={{ color: isActive ? "#00fff7" : isDone ? "#4a5a5a" : "#2a2a2a", width: "1.2rem" }}>
                   {isDone ? "✓" : isActive ? "›" : "·"}
                 </span>
                 <span style={{ flex: 1 }}>{t(key)}</span>
                 {isDone && (
-                  <span style={{ color: "#ff00c8", fontSize: "0.7rem", letterSpacing: "0.05em" }}>
+                  <span style={{ color: "#ff00c8", fontSize: "0.85rem", letterSpacing: "0.05em" }}>
                     [OK]
                   </span>
                 )}
@@ -196,7 +196,7 @@ export default function BootScreen({ onComplete }: Props) {
                     className="boot-cursor"
                     style={{
                       color: "#00fff7",
-                      fontSize: "0.8rem",
+                      fontSize: "0.95rem",
                       animation: "blink-cursor 0.7s step-end infinite",
                     }}
                   >
@@ -212,9 +212,9 @@ export default function BootScreen({ onComplete }: Props) {
         <div style={{ marginBottom: "1rem" }}>
           <div
             style={{
-              height: "2px",
+              height: "3px",
               backgroundColor: "#0a0a0a",
-              borderRadius: "1px",
+              borderRadius: "2px",
               overflow: "hidden",
               border: "1px solid #111",
             }}
@@ -229,17 +229,17 @@ export default function BootScreen({ onComplete }: Props) {
                 backgroundSize: "200% 100%",
                 animation: "progress-shine 1.5s linear infinite",
                 transition: "width 0.35s ease-out",
-                borderRadius: "1px",
+                borderRadius: "2px",
               }}
             />
           </div>
           <div
             style={{
               textAlign: "right",
-              marginTop: "0.3rem",
-              fontSize: "0.65rem",
+              marginTop: "0.35rem",
+              fontSize: "0.85rem",
               color: "#00fff7",
-              opacity: 0.6,
+              opacity: 0.8,
               letterSpacing: "0.05em",
             }}
           >
@@ -251,8 +251,8 @@ export default function BootScreen({ onComplete }: Props) {
         <div
           style={{
             textAlign: "center",
-            fontSize: "0.6rem",
-            color: "#222",
+            fontSize: "0.7rem",
+            color: "#444",
             letterSpacing: "0.12em",
             textTransform: "uppercase",
             marginTop: "0.5rem",

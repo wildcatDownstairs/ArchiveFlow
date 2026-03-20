@@ -6,52 +6,174 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ArchiveFlow</title>
     <style>
-      /* Static splash — visible instantly before JS loads */
-      body { margin: 0; background: #000; }
+      body { margin: 0; background: #000; overflow: hidden; }
+
+      /* ===== Static splash — full boot screen before JS ===== */
       #static-splash {
-        position: fixed;
-        inset: 0;
-        z-index: 10000;
+        position: fixed; inset: 0; z-index: 10000;
         background: #000;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
         font-family: 'Cascadia Code', 'Source Code Pro', ui-monospace, monospace;
       }
-      #static-splash .logo {
+      #static-splash.hidden { display: none; }
+
+      /* CRT scanlines */
+      .s-scan {
+        position: absolute; inset: 0; pointer-events: none;
+        background-image: repeating-linear-gradient(
+          0deg, transparent, transparent 2px,
+          rgba(0,255,247,0.03) 2px, rgba(0,255,247,0.03) 4px
+        );
+        background-size: 100% 4px;
+        animation: s-scanline 8s linear infinite;
+      }
+      @keyframes s-scanline { from { background-position: 0 0; } to { background-position: 0 100%; } }
+
+      /* Content wrapper */
+      .s-wrap { position: relative; width: min(560px, 90vw); }
+
+      /* Logo */
+      .s-logo-box { position: relative; margin-bottom: 2.5rem; text-align: center; }
+      .s-logo {
         font-size: clamp(1.8rem, 5vw, 2.8rem);
-        font-weight: 900;
-        letter-spacing: 0.25em;
+        font-weight: 900; letter-spacing: 0.25em;
         color: #00fff7;
         text-shadow: 0 0 20px rgba(0,255,247,0.5);
       }
-      #static-splash .sub {
-        margin-top: 1.5rem;
-        font-size: 0.7rem;
-        color: #00fff7;
-        opacity: 0.4;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
+      .s-glitch1, .s-glitch2 {
+        position: absolute; inset: 0; text-align: center;
+        mix-blend-mode: screen; user-select: none;
       }
-      /* Blinking cursor after "BOOT" */
-      #static-splash .blink {
-        animation: s-blink 0.7s step-end infinite;
+      .s-glitch1 { color: #ff00c8; animation: s-glitch 2.4s infinite linear alternate-reverse; }
+      .s-glitch2 { color: #00fff7; animation: s-glitch 3.1s 0.7s infinite linear alternate; }
+      @keyframes s-glitch {
+        0%   { clip-path: inset(40% 0 61% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+        10%  { clip-path: inset(92% 0 1% 0);  transform: translateX(4px);  text-shadow:-3px 0 #ff00c8,  3px 0 #00fff7; }
+        20%  { clip-path: inset(43% 0 1% 0);  transform: translateX(0);    text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+        30%  { clip-path: inset(25% 0 58% 0); transform: translateX(3px);  text-shadow:-2px 0 #ff00c8,  2px 0 #00fff7; }
+        40%  { clip-path: inset(54% 0 7% 0);  transform: translateX(-3px); text-shadow: 2px 0 #ff00c8, -2px 0 #00fff7; }
+        50%  { clip-path: inset(58% 0 43% 0); transform: translateX(4px);  text-shadow:-3px 0 #ff00c8,  3px 0 #00fff7; }
+        60%  { clip-path: inset(50% 0 1% 0);  transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+        70%  { clip-path: inset(67% 0 27% 0); transform: translateX(0);    text-shadow:-2px 0 #ff00c8,  2px 0 #00fff7; }
+        80%  { clip-path: inset(14% 0 73% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+        90%  { clip-path: inset(97% 0 2% 0);  transform: translateX(4px);  text-shadow:-3px 0 #ff00c8,  3px 0 #00fff7; }
+        100% { clip-path: inset(40% 0 61% 0); transform: translateX(-4px); text-shadow: 3px 0 #ff00c8, -3px 0 #00fff7; }
+      }
+
+      /* Step list */
+      .s-steps { margin-bottom: 1.75rem; display: flex; flex-direction: column; gap: 0.55rem; }
+      .s-step {
+        display: flex; align-items: center; gap: 0.6rem;
+        font-size: 0.95rem;
+        color: #445; opacity: 0.25;
+        animation: s-step-on 0.4s ease-out both;
+      }
+      .s-step .s-icon { width: 1.2rem; color: #00fff7; }
+      .s-step .s-label { flex: 1; }
+      .s-step .s-ok { color: #ff00c8; font-size: 0.85rem; letter-spacing: 0.05em; opacity: 0; animation: s-ok-show 0.1s ease-out both; }
+      .s-step .s-cursor { color: #00fff7; animation: s-blink 0.7s step-end infinite; }
+
+      /* Step stagger: each step activates 1.5s apart */
+      .s-step:nth-child(1) { animation-delay: 0.3s; }
+      .s-step:nth-child(2) { animation-delay: 1.8s; }
+      .s-step:nth-child(3) { animation-delay: 3.3s; }
+      .s-step:nth-child(4) { animation-delay: 4.8s; }
+      .s-step:nth-child(5) { animation-delay: 6.3s; }
+      .s-step:nth-child(6) { animation-delay: 7.8s; }
+
+      /* [OK] shows 1.2s after the step activates */
+      .s-step:nth-child(1) .s-ok { animation-delay: 1.5s; }
+      .s-step:nth-child(2) .s-ok { animation-delay: 3.0s; }
+      .s-step:nth-child(3) .s-ok { animation-delay: 4.5s; }
+      .s-step:nth-child(4) .s-ok { animation-delay: 6.0s; }
+      .s-step:nth-child(5) .s-ok { animation-delay: 7.5s; }
+      .s-step:nth-child(6) .s-ok { animation-delay: 9.0s; }
+
+      @keyframes s-step-on {
+        to { opacity: 0.9; color: #00fff7; }
+      }
+      @keyframes s-ok-show {
+        to { opacity: 1; }
       }
       @keyframes s-blink {
         0%, 100% { opacity: 1; }
         50% { opacity: 0; }
       }
-      /* Hide splash once React takes over — JS adds this class */
-      #static-splash.hidden { display: none; }
+
+      /* Progress bar */
+      .s-bar-wrap { margin-bottom: 1rem; }
+      .s-bar {
+        height: 3px; background: #0a0a0a; border-radius: 2px;
+        overflow: hidden; border: 1px solid #111;
+      }
+      .s-bar-fill {
+        height: 100%; width: 0%; border-radius: 2px;
+        background: linear-gradient(90deg, #004d4d, #00fff7 40%, #80ffff 50%, #00fff7 60%, #004d4d);
+        background-size: 200% 100%;
+        animation: s-bar-grow 10s ease-out forwards, s-bar-shine 1.5s linear infinite;
+      }
+      @keyframes s-bar-grow { to { width: 92%; } }
+      @keyframes s-bar-shine {
+        from { background-position: -200% center; }
+        to   { background-position: 200% center; }
+      }
+      .s-pct {
+        text-align: right; margin-top: 0.35rem;
+        font-size: 0.85rem; color: #00fff7; opacity: 0.8;
+        letter-spacing: 0.05em;
+      }
+
+      /* Footer */
+      .s-footer {
+        text-align: center; font-size: 0.7rem;
+        color: #444; letter-spacing: 0.12em;
+        text-transform: uppercase; margin-top: 0.5rem;
+      }
+
+      /* Reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        .s-glitch1, .s-glitch2 { animation: none !important; }
+        .s-scan { animation: none !important; }
+        .s-bar-fill { animation: s-bar-grow 10s ease-out forwards !important; }
+        .s-step .s-cursor { animation: none !important; opacity: 1 !important; }
+      }
     </style>
   </head>
   <body>
     <div id="static-splash">
-      <div class="logo">ARCHIVEFLOW</div>
-      <div class="sub">SYS_BOOT<span class="blink">_</span></div>
+      <div class="s-scan"></div>
+      <div class="s-wrap">
+        <div class="s-logo-box">
+          <div class="s-logo">ARCHIVEFLOW</div>
+          <div class="s-logo s-glitch1" aria-hidden="true">ARCHIVEFLOW</div>
+          <div class="s-logo s-glitch2" aria-hidden="true">ARCHIVEFLOW</div>
+        </div>
+
+        <div class="s-steps">
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">初始化运行时环境</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">建立数据库连接</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">加载任务列表</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">读取审计记录</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">同步应用配置</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+          <div class="s-step"><span class="s-icon">›</span><span class="s-label">系统就绪</span><span class="s-ok">[OK]</span><span class="s-cursor">_</span></div>
+        </div>
+
+        <div class="s-bar-wrap">
+          <div class="s-bar"><div class="s-bar-fill"></div></div>
+          <div class="s-pct" id="s-pct">0%</div>
+        </div>
+
+        <div class="s-footer">SYS_BOOT v0.1.0 // ARCHIVEFLOW</div>
+      </div>
     </div>
     <div id="root"></div>
+    <script>
+      /* Tiny inline: animate percentage counter while JS bundle loads */
+      (function(){var e=document.getElementById('s-pct'),v=0;
+        var t=setInterval(function(){v++;if(v>92){clearInterval(t);return;}
+        e.textContent=v+'%';},108);})();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
