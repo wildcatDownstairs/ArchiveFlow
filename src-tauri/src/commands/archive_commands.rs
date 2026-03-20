@@ -56,10 +56,19 @@ pub async fn import_archive(
     };
 
     // 根据检测结果确定初始状态
-    let status = if archive_info.is_some() {
-        TaskStatus::Ready
-    } else {
-        TaskStatus::Imported
+    // 只有 ZIP 类型且成功解析了归档内容时才标记为 Ready
+    // 7z/RAR 目前只能做类型检测，无法解析内容，标记为 Imported 并给出提示
+    let (status, error_message) = match (&archive_type, &archive_info) {
+        (ArchiveType::Zip, Some(_)) => (TaskStatus::Ready, None),
+        (ArchiveType::SevenZ, _) => (
+            TaskStatus::Imported,
+            Some("7z 格式暂不支持内容解析和密码恢复，仅识别了文件类型".to_string()),
+        ),
+        (ArchiveType::Rar, _) => (
+            TaskStatus::Imported,
+            Some("RAR 格式暂不支持内容解析和密码恢复，仅识别了文件类型".to_string()),
+        ),
+        _ => (TaskStatus::Imported, None),
     };
 
     let task = Task {
@@ -71,7 +80,7 @@ pub async fn import_archive(
         status,
         created_at: now,
         updated_at: now,
-        error_message: None,
+        error_message,
         archive_info,
     };
 

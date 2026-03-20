@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -10,8 +10,32 @@ use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryProgress, Reco
 
 // ─── 密码验证 ─────────────────────────────────────────────────────
 
-/// 尝试用给定密码打开 ZIP 文件中的第一个加密条目。
+/// 在已打开的 ZipArchive 上，用给定密码尝试解密指定索引的条目。
+/// 利用复用的 archive 避免每次密码尝试都重新打开文件。
 /// 返回 true 表示密码正确，false 表示密码错误。
+pub fn try_password_on_archive<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    index: usize,
+    password: &str,
+) -> bool {
+    // 尝试用密码解密
+    let result = archive.by_index_decrypt(index, password.as_bytes());
+    let mut zip_file = match result {
+        Ok(f) => f,
+        Err(_) => return false, // InvalidPassword 或其他 IO 错误
+    };
+
+    // by_index_decrypt 成功不代表密码一定正确（ZipCrypto 有 1/256 误判率）
+    // 需要实际读取全部数据，如果 CRC 校验失败会返回 IO 错误
+    let mut buf = Vec::new();
+    match zip_file.read_to_end(&mut buf) {
+        Ok(_) => true,
+        Err(_) => false, // CRC 校验失败 → 密码错误
+    }
+}
+
+/// 独立版本：尝试用给定密码打开 ZIP 文件中的第一个加密条目。
+/// 每次调用都会重新打开文件（适合单次测试，不适合热路径）。
 pub fn try_password_zip(file_path: &Path, password: &str) -> bool {
     let file = match std::fs::File::open(file_path) {
         Ok(f) => f,
@@ -35,20 +59,7 @@ pub fn try_password_zip(file_path: &Path, password: &str) -> bool {
         None => return false, // 没有加密条目
     };
 
-    // 尝试用密码解密并读取全部数据以触发 CRC 校验
-    let result = archive.by_index_decrypt(index, password.as_bytes());
-    let mut zip_file = match result {
-        Ok(f) => f,
-        Err(_) => return false, // InvalidPassword 或其他 IO 错误
-    };
-
-    // by_index_decrypt 成功不代表密码一定正确（ZipCrypto 有 1/256 误判率）
-    // 需要实际读取全部数据，如果 CRC 校验失败会返回 IO 错误
-    let mut buf = Vec::new();
-    match zip_file.read_to_end(&mut buf) {
-        Ok(_) => true,
-        Err(_) => false, // CRC 校验失败 → 密码错误
-    }
+    try_password_on_archive(&mut archive, index, password)
 }
 
 // ─── 暴力破解密码生成器 ────────────────────────────────────────────
@@ -163,39 +174,53 @@ pub fn generate_bruteforce_passwords(
 /// 进度报告间隔（毫秒）
 const PROGRESS_INTERVAL_MS: u128 = 500;
 
+/// 恢复结果：明确区分三种终态
+#[derive(Debug)]
+pub enum RecoveryResult {
+    /// 成功找到密码
+    Found(String),
+    /// 穷尽所有候选密码，未找到
+    Exhausted,
+    /// 用户取消
+    Cancelled,
+}
+
 /// 运行密码恢复任务。
 ///
 /// 返回值：
-/// - `Ok(Some(password))` — 成功找到密码
-/// - `Ok(None)` — 穷尽所有候选密码或被取消
+/// - `Ok(RecoveryResult::Found(password))` — 成功找到密码
+/// - `Ok(RecoveryResult::Exhausted)` — 穷尽所有候选密码
+/// - `Ok(RecoveryResult::Cancelled)` — 被用户取消
 /// - `Err(msg)` — 发生错误
 pub fn run_recovery(
     config: RecoveryConfig,
     file_path: String,
     app_handle: tauri::AppHandle,
     cancel_flag: Arc<AtomicBool>,
-) -> Result<Option<String>, String> {
+) -> Result<RecoveryResult, String> {
     let path = Path::new(&file_path);
 
     if !path.exists() {
         return Err(format!("文件不存在: {}", file_path));
     }
 
-    // 验证文件是有效的 ZIP 且包含加密条目
-    {
-        let file = std::fs::File::open(path).map_err(|e| format!("无法打开文件: {}", e))?;
-        let mut archive =
-            zip::ZipArchive::new(file).map_err(|e| format!("无法解析 ZIP 文件: {}", e))?;
-        let has_encrypted = (0..archive.len()).any(|i| {
-            archive
-                .by_index_raw(i)
-                .map(|entry| entry.encrypted())
-                .unwrap_or(false)
-        });
-        if !has_encrypted {
-            return Err("该 ZIP 文件没有加密条目".to_string());
-        }
-    }
+    // 打开文件并创建 ZipArchive（只做一次）
+    let file = std::fs::File::open(path).map_err(|e| format!("无法打开文件: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("无法解析 ZIP 文件: {}", e))?;
+
+    // 找到第一个加密的非目录条目的索引（只做一次）
+    let encrypted_index = (0..archive.len()).find(|&i| {
+        archive
+            .by_index_raw(i)
+            .map(|entry| entry.encrypted() && !entry.is_dir())
+            .unwrap_or(false)
+    });
+
+    let index = match encrypted_index {
+        Some(i) => i,
+        None => return Err("该 ZIP 文件没有加密条目".to_string()),
+    };
 
     let task_id = config.task_id.clone();
     let start_time = Instant::now();
@@ -260,13 +285,13 @@ pub fn run_recovery(
                 },
             );
             log::info!("恢复任务已取消: {} (已尝试 {} 个密码)", task_id, tried);
-            return Ok(None);
+            return Ok(RecoveryResult::Cancelled);
         }
 
         tried += 1;
 
-        // 尝试密码
-        if try_password_zip(path, &password) {
+        // 尝试密码（复用已打开的 archive 和已确定的 index）
+        if try_password_on_archive(&mut archive, index, &password) {
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {
                 tried as f64 / elapsed
@@ -291,7 +316,7 @@ pub fn run_recovery(
                 tried,
                 elapsed
             );
-            return Ok(Some(password));
+            return Ok(RecoveryResult::Found(password));
         }
 
         // 定时报告进度
@@ -345,5 +370,5 @@ pub fn run_recovery(
         elapsed
     );
 
-    Ok(None)
+    Ok(RecoveryResult::Exhausted)
 }

@@ -3,7 +3,7 @@ use tauri::{command, AppHandle, Manager, State};
 use crate::db::Database;
 use crate::domain::recovery::{AttackMode, RecoveryConfig, RecoveryManager};
 use crate::errors::AppError;
-use crate::services::recovery_service;
+use crate::services::recovery_service::{self, RecoveryResult};
 
 /// 启动密码恢复任务
 ///
@@ -87,14 +87,22 @@ pub async fn start_recovery(
         mode: attack_mode,
     };
 
-    // 3. 注册取消标志
+    // 3. 检查是否已有运行中的恢复任务
+    if recovery_manager.is_running(&task_id) {
+        return Err(AppError::InvalidArgument(format!(
+            "该任务已有运行中的恢复: {}",
+            task_id
+        )));
+    }
+
+    // 4. 注册取消标志
     let cancel_flag = recovery_manager.register(&task_id);
 
-    // 4. 更新任务状态为 processing
+    // 5. 更新任务状态为 processing
     db.update_task_status(&task_id, "processing", None)?;
     log::info!("恢复任务已启动: {} (模式: {})", task_id, mode);
 
-    // 5. 在后台线程中运行恢复
+    // 6. 在后台线程中运行恢复
     let task_id_clone = task_id.clone();
     let app_handle_clone = app_handle.clone();
 
@@ -112,8 +120,8 @@ pub async fn start_recovery(
         let recovery_mgr = app_handle_clone.state::<RecoveryManager>();
 
         match result {
-            Ok(Some(password)) => {
-                // 找到密码 → succeeded
+            Ok(RecoveryResult::Found(password)) => {
+                // 找到密码 → succeeded，密码存入 error_message 字段（后续可加专用列）
                 log::info!("恢复成功: {} 密码={}", task_id_clone, password);
                 let _ = db.update_task_status(
                     &task_id_clone,
@@ -121,13 +129,22 @@ pub async fn start_recovery(
                     Some(&format!("密码: {}", password)),
                 );
             }
-            Ok(None) => {
-                // 未找到密码（穷尽或取消） → failed
-                log::info!("恢复未找到密码: {}", task_id_clone);
+            Ok(RecoveryResult::Exhausted) => {
+                // 穷尽所有密码 → failed
+                log::info!("恢复已穷尽: {}", task_id_clone);
                 let _ = db.update_task_status(
                     &task_id_clone,
                     "failed",
-                    Some("未找到密码"),
+                    Some("已穷尽所有候选密码，未找到匹配密码"),
+                );
+            }
+            Ok(RecoveryResult::Cancelled) => {
+                // 用户取消 → failed（取消信息）
+                log::info!("恢复已取消: {}", task_id_clone);
+                let _ = db.update_task_status(
+                    &task_id_clone,
+                    "failed",
+                    Some("用户已取消恢复任务"),
                 );
             }
             Err(err) => {

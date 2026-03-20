@@ -145,11 +145,19 @@ export default function TaskDetailPage() {
   const { currentTask, fetchTask, removeTask } = useTaskStore()
   const [loading, setLoading] = useState(true)
 
+  const loadTask = useCallback(async (id: string) => {
+    setLoading(true)
+    try {
+      await fetchTask(id)
+    } finally {
+      setLoading(false)
+    }
+  }, [fetchTask])
+
   useEffect(() => {
     if (!taskId) return
-    setLoading(true)
-    fetchTask(taskId).finally(() => setLoading(false))
-  }, [taskId, fetchTask])
+    void loadTask(taskId)
+  }, [taskId, loadTask])
 
   // 恢复状态变化时刷新任务数据
   const handleRecoveryStatusChange = useCallback(() => {

@@ -89,6 +89,12 @@ impl RecoveryManager {
         }
     }
 
+    /// 检查指定任务是否正在运行
+    pub fn is_running(&self, task_id: &str) -> bool {
+        let flags = self.cancel_flags.lock().unwrap();
+        flags.contains_key(task_id)
+    }
+
     /// 移除指定任务的取消标志（任务完成后清理）
     pub fn remove(&self, task_id: &str) {
         let mut flags = self.cancel_flags.lock().unwrap();
