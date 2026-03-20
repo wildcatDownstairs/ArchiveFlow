@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Globe,
@@ -38,7 +38,7 @@ export default function SettingsPage() {
   const [auditCount, setAuditCount] = useState(0)
   const [confirmAction, setConfirmAction] = useState<"tasks" | "audit" | null>(null)
 
-  const loadStats = useCallback(async () => {
+  const loadStats = async () => {
     try {
       const [tasks, audits] = await getStats()
       setTaskCount(tasks)
@@ -46,14 +46,32 @@ export default function SettingsPage() {
     } catch {
       // Ignore stats loading errors in the settings UI.
     }
-  }, [])
+  }
 
   useEffect(() => {
+    let isMounted = true
+
     getAppDataDir()
-      .then((dir) => setAppDataDir(dir))
+      .then((dir) => {
+        if (isMounted) {
+          setAppDataDir(dir)
+        }
+      })
       .catch(() => {})
-    void loadStats()
-  }, [loadStats])
+
+    getStats()
+      .then(([tasks, audits]) => {
+        if (isMounted) {
+          setTaskCount(tasks)
+          setAuditCount(audits)
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
     try {
