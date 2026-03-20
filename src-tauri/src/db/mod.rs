@@ -1,6 +1,14 @@
+// db/mod.rs 是数据库访问层（DAL，Data Access Layer）。
+// 它封装了所有与 SQLite 数据库的交互：建表、增删改查。
+// 上层代码（commands、services）通过这里的方法操作数据，不直接写 SQL。
+
+// 声明子模块 migrations（对应 migrations.rs 文件），
+// 模块私有（无 pub），只在 db 模块内部使用。
 mod migrations;
 
+// params! 宏：构造 SQL 参数列表，rusqlite 用它做参数化查询（防 SQL 注入）
 use rusqlite::{params, Connection};
+// PathBuf 是拥有所有权的文件系统路径类型（类似 String 之于 &str）
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -11,6 +19,15 @@ use crate::domain::task::{ArchiveType, Task, TaskStatus};
 use crate::errors::AppError;
 use chrono::{DateTime, Utc};
 
+/// 数据库访问对象（单例，通过 Tauri State 注入）
+///
+/// 为什么把 Connection 包在 Mutex 里？
+///   - SQLite 连接本身不是线程安全的（不能同时被多个线程使用）
+///   - Tauri 的命令可能并发执行（多个前端请求同时到达）
+///   - Mutex 保证同一时刻只有一个线程持有 Connection
+///   - Mutex<Connection> 整体实现了 Send + Sync，可以安全地在线程间共享
+///
+/// Tauri 在 app.manage(db) 后，会将 Database 包进 Arc 并共享给所有命令。
 pub struct Database {
     pub conn: Mutex<Connection>,
 }
@@ -19,6 +36,11 @@ const STARTUP_INTERRUPTED_MESSAGE: &str =
     "应用启动时检测到上次恢复未正常结束，任务已标记为 interrupted";
 
 impl Database {
+    /// 打开（或创建）数据库文件，并运行迁移脚本。
+    ///
+    /// app_dir 是系统分配的应用数据目录（由 lib.rs 中的 app.path() 获取）。
+    /// Box<dyn std::error::Error> 是"任何实现了 Error trait 的类型"的动态分发，
+    /// 适合在初始化函数中汇总多种不同的错误类型（Sqlite错误、迁移错误等）。
     pub fn new(app_dir: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         let db_path = app_dir.join("archiveflow.db");
         let mut conn = Connection::open(&db_path)?;
@@ -30,8 +52,17 @@ impl Database {
         })
     }
 
-    /// 从 row 解析 Task（共享逻辑）
+    /// 从 SQLite 行解析 Task 结构体（内部共享逻辑，不暴露给外部）。
+    ///
+    /// 为什么单独提取成函数？
+    ///   get_all_tasks / get_task_by_id / interrupt_processing_tasks 都需要把行解析成 Task，
+    ///   提取成函数避免重复代码，也方便单独测试。
+    ///
+    /// row: &rusqlite::Row 是 SQLite 结果集中一行的借用，
+    /// rusqlite::Result<Task> 是 rusqlite 库内部的 Result 类型。
     fn parse_task_row(row: &rusqlite::Row) -> rusqlite::Result<Task> {
+        // row.get(N) 按列索引读取，对应 SELECT 中列的顺序（0-indexed）。
+        // i64：SQLite 的 INTEGER 映射到 Rust 的 i64，后面再转 u64。
         let file_size: i64 = row.get(3)?;
         let archive_type_str: String = row.get(4)?;
         let status_str: String = row.get(5)?;
@@ -41,15 +72,20 @@ impl Database {
         let found_password: Option<String> = row.get(9)?;
         let archive_info_json: Option<String> = row.get(10)?;
 
+        // serde_json::from_value 把 JSON Value 反序列化成 ArchiveType 枚举。
+        // .unwrap_or(ArchiveType::Unknown) 在解析失败时回退到 Unknown，保持健壮性。
         let archive_type: ArchiveType =
             serde_json::from_value(serde_json::Value::String(archive_type_str))
                 .unwrap_or(ArchiveType::Unknown);
+        // normalize_persisted 处理历史遗留状态字符串（见 domain/task.rs）
         let status = TaskStatus::normalize_persisted(
             &status_str,
             &archive_type,
-            error_message.as_deref(),
+            error_message.as_deref(), // Option<String> → Option<&str>，避免不必要的 clone
             archive_info_json.is_some(),
         );
+        // 时间戳在数据库里存为 RFC 3339 字符串（如 "2024-01-01T00:00:00Z"）
+        // parse_from_rfc3339 解析失败时回退到当前时间（防止数据损坏导致崩溃）
         let created_at: DateTime<Utc> = DateTime::parse_from_rfc3339(&created_at_str)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -57,6 +93,8 @@ impl Database {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
 
+        // .and_then 在 Option 有值时执行闭包，无值时保持 None（函数式链式调用）。
+        // serde_json::from_str(&json).ok() 把 Result 转成 Option，忽略错误。
         let archive_info: Option<ArchiveInfo> =
             archive_info_json.and_then(|json| serde_json::from_str(&json).ok());
 
@@ -64,7 +102,7 @@ impl Database {
             id: row.get(0)?,
             file_path: row.get(1)?,
             file_name: row.get(2)?,
-            file_size: file_size as u64,
+            file_size: file_size as u64, // 从 i64 安全转换（文件大小不可能为负）
             archive_type,
             status,
             created_at,
@@ -77,8 +115,13 @@ impl Database {
 
     /// 插入新任务
     pub fn insert_task(&self, task: &Task) -> Result<(), AppError> {
+        // self.conn.lock() 获取 Mutex 锁，得到 MutexGuard<Connection>。
+        // MutexGuard 实现了 Deref，可以直接调用 Connection 的方法。
+        // 当 conn 变量离开作用域（函数结束）时，MutexGuard 自动释放锁。
         let conn = self.conn.lock().unwrap();
         let status_str = task.status.as_str().to_string();
+        // serde_json::to_value 把枚举序列化成 JSON Value，
+        // .as_str() 取字符串值（枚举用 rename_all = "lowercase" 所以得到 "zip" 之类）。
         let archive_type_str = serde_json::to_value(&task.archive_type)?
             .as_str()
             .unwrap()
@@ -86,6 +129,9 @@ impl Database {
         let created_at_str = task.created_at.to_rfc3339();
         let updated_at_str = task.updated_at.to_rfc3339();
         let found_password = task.found_password.clone();
+        // Option<T>.as_ref() 得到 Option<&T>（借用内部值）
+        // .map(|info| serde_json::to_string(info)) 把 Option<&ArchiveInfo> 转成 Option<Result<String>>
+        // .transpose()? 把 Option<Result<T>> 转成 Result<Option<T>>，然后 ? 传播错误
         let archive_info_json = task
             .archive_info
             .as_ref()
@@ -99,7 +145,7 @@ impl Database {
                 task.id,
                 task.file_path,
                 task.file_name,
-                task.file_size as i64,
+                task.file_size as i64, // u64 → i64（SQLite 用 i64 存整数）
                 archive_type_str,
                 status_str,
                 created_at_str,
@@ -115,15 +161,19 @@ impl Database {
     /// 获取所有任务，按创建时间降序
     pub fn get_all_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.conn.lock().unwrap();
+        // prepare 编译 SQL 成预处理语句，比每次传原始字符串高效
         let mut stmt = conn.prepare(
             "SELECT id, file_path, file_name, file_size, archive_type, status, created_at, updated_at, error_message, found_password, archive_info
              FROM tasks ORDER BY created_at DESC",
         )?;
 
+        // query_map 对每一行执行 parse_task_row 函数，返回迭代器
+        // Self::parse_task_row 是函数指针（不是闭包），写法简洁
         let tasks = stmt.query_map([], Self::parse_task_row)?;
 
         let mut result = Vec::new();
         for task in tasks {
+            // task 是 rusqlite::Result<Task>，? 解包并在出错时返回
             result.push(task?);
         }
         Ok(result)
@@ -187,6 +237,10 @@ impl Database {
     }
 
     /// 启动时将残留的 processing 任务转为 interrupted
+    ///
+    /// 应用正常运行时，恢复任务结束后状态会被改为 succeeded/exhausted/cancelled/failed。
+    /// 如果应用崩溃或被强制关闭，任务会永远停在 "processing" 状态。
+    /// 下次启动时这里检测并修复这些"僵尸任务"。
     pub fn interrupt_processing_tasks(&self) -> Result<Vec<Task>, AppError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -200,6 +254,10 @@ impl Database {
             interrupted_tasks.push(task?);
         }
 
+        // drop(stmt) 显式释放 stmt，因为它对 conn 有借用。
+        // 如果不释放，下面的 conn.execute() 会报"不可变借用冲突"编译错误。
+        // 通常 Rust 编译器会在变量离开作用域时自动 drop，但这里 stmt 和 conn
+        // 在同一个作用域内，需要手动 drop 来释放借用。
         drop(stmt);
 
         if interrupted_tasks.is_empty() {
@@ -209,6 +267,7 @@ impl Database {
         let now = Utc::now();
         let updated_at = now.to_rfc3339();
 
+        // &mut interrupted_tasks：可变借用，允许在循环中修改 task 字段
         for task in &mut interrupted_tasks {
             conn.execute(
                 "UPDATE tasks
@@ -216,6 +275,7 @@ impl Database {
                  WHERE id = ?3",
                 params![updated_at, STARTUP_INTERRUPTED_MESSAGE, task.id],
             )?;
+            // 同时更新内存中的 Task 对象，保持数据库和内存状态一致
             task.status = TaskStatus::Interrupted;
             task.updated_at = now;
             task.error_message = Some(STARTUP_INTERRUPTED_MESSAGE.to_string());
@@ -261,9 +321,7 @@ impl Database {
 
     // ─── Recovery Checkpoints ───────────────────────────────────────
 
-    fn parse_recovery_checkpoint_row(
-        row: &rusqlite::Row,
-    ) -> rusqlite::Result<RecoveryCheckpoint> {
+    fn parse_recovery_checkpoint_row(row: &rusqlite::Row) -> rusqlite::Result<RecoveryCheckpoint> {
         // SQLite 里保存的是字符串和整数，这里把它们重新组装成业务结构体，
         // 这样上层代码就不需要关心底层表结构细节。
         let mode_json: String = row.get(1)?;
@@ -296,7 +354,11 @@ impl Database {
         })
     }
 
-    pub fn upsert_recovery_checkpoint(&self, checkpoint: &RecoveryCheckpoint) -> Result<(), AppError> {
+    /// 插入或更新恢复断点（断点续传核心方法）
+    pub fn upsert_recovery_checkpoint(
+        &self,
+        checkpoint: &RecoveryCheckpoint,
+    ) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
         let mode_json = serde_json::to_string(&checkpoint.mode)?;
         let archive_type_str = serde_json::to_value(&checkpoint.archive_type)?
@@ -304,6 +366,11 @@ impl Database {
             .unwrap()
             .to_string();
 
+        // ON CONFLICT ... DO UPDATE SET 是 SQLite 的 UPSERT 语法：
+        //   - 如果 task_id 不存在 → INSERT（新增）
+        //   - 如果 task_id 已存在 → UPDATE（更新）
+        // excluded.xxx 引用"本次想插入但因冲突被拒绝的那行"的值。
+        // 这样可以用一条 SQL 完成"有则更新、无则插入"，比先 SELECT 再 INSERT/UPDATE 更高效。
         conn.execute(
             "INSERT INTO recovery_checkpoints (task_id, mode_json, archive_type, tried, total, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -401,7 +468,8 @@ impl Database {
     pub fn clear_audit_events_and_record(&self, event: &AuditEvent) -> Result<u64, AppError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        let cleared: i64 = tx.query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))?;
+        let cleared: i64 =
+            tx.query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0))?;
         let event_type_str = event.event_type.as_str().to_string();
         let timestamp_str = event.timestamp.to_rfc3339();
 
@@ -506,9 +574,7 @@ mod tests {
         let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({table_name})"))
             .unwrap();
-        let columns = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap();
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1)).unwrap();
 
         let exists = columns
             .into_iter()

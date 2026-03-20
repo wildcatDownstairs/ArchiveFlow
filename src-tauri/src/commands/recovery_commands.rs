@@ -126,7 +126,11 @@ fn dispatch_scheduled_recoveries(app_handle: &AppHandle) {
                 continue;
             }
             Err(error) => {
-                log::error!("读取调度任务失败: task={} error={}", scheduled.task_id, error);
+                log::error!(
+                    "读取调度任务失败: task={} error={}",
+                    scheduled.task_id,
+                    error
+                );
                 let _ = scheduler.mark_queued(&scheduled.task_id);
                 continue;
             }
@@ -239,7 +243,10 @@ fn spawn_recovery_worker(
             }
             Ok(RecoveryResult::Cancelled) => {
                 if matches!(
-                    scheduler.get_task(&task_id).as_ref().map(|task| &task.state),
+                    scheduler
+                        .get_task(&task_id)
+                        .as_ref()
+                        .map(|task| &task.state),
                     Some(ScheduledRecoveryState::Paused)
                 ) {
                     log::info!("恢复已暂停: {}", task_id);
@@ -374,7 +381,12 @@ pub async fn start_recovery(
         );
     }
 
-    log::info!("恢复任务已调度: {} (模式: {}, 状态: {:?})", task_id, mode, state);
+    log::info!(
+        "恢复任务已调度: {} (模式: {}, 状态: {:?})",
+        task_id,
+        mode,
+        state
+    );
     Ok(state)
 }
 
@@ -461,7 +473,9 @@ pub async fn resume_recovery(
 
     if let Some(existing) = scheduler.get_task(&task_id) {
         if existing.state != ScheduledRecoveryState::Paused {
-            return Err(AppError::InvalidArgument("当前任务不处于暂停状态".to_string()));
+            return Err(AppError::InvalidArgument(
+                "当前任务不处于暂停状态".to_string(),
+            ));
         }
         let resumed = scheduler
             .resume(&task_id)
