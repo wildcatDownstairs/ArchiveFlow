@@ -185,7 +185,7 @@ body {
   }
 
   .af-page {
-    min-height: 100vh;
+    min-height: 100%;
     padding: 2rem 2.5rem 2.5rem;
     background-color: transparent;
   }
@@ -715,6 +715,8 @@ body {
   }
 
   .af-main-shell {
+    height: 100vh;
+    overflow: hidden;
     background-color: var(--color-background);
     background-image: var(--af-page-gradient);
     transition:
