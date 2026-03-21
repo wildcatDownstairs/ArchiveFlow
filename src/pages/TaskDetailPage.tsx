@@ -18,6 +18,7 @@ import {
 import { save } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
+import { useAppStore } from "@/stores/appStore"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatFileSize, formatDateTime } from "@/lib/format"
 import { buildFileTree, type TreeNode } from "@/lib/fileTree"
@@ -102,8 +103,24 @@ export default function TaskDetailPage() {
   const { t } = useTranslation()
   const { taskId } = useParams<{ taskId: string }>()
   const navigate = useNavigate()
+  const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
   const { currentTask, fetchTask, removeTask } = useTaskStore()
   const [loading, setLoading] = useState(true)
+
+  const buildExportFileName = useCallback((fileName: string, format: ExportFormat) => {
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[-:]/g, "")
+      .replace("T", "-")
+      .slice(0, 15)
+    const sanitizedName = fileName
+      .replace(/\.[^.]+$/, "")
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .trim()
+      .slice(0, 60) || "task"
+
+    return `archiveflow-${sanitizedName}-${timestamp}.${format}`
+  }, [])
 
   const loadTask = useCallback(async (id: string) => {
     setLoading(true)
@@ -139,12 +156,7 @@ export default function TaskDetailPage() {
 
   const handleExport = async (format: ExportFormat) => {
     if (!currentTask) return
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace("T", "-")
-      .slice(0, 15)
-    const defaultName = `archiveflow-export-${timestamp}.${format}`
+    const defaultName = buildExportFileName(currentTask.file_name, format)
     const ext = format === "csv" ? "csv" : "json"
 
     const filePath = await save({
@@ -154,7 +166,10 @@ export default function TaskDetailPage() {
     if (!filePath) return
 
     try {
-      const content = await exportTasks([currentTask.id], format)
+      const content = await exportTasks([currentTask.id], format, {
+        maskPasswords: recoveryPreferences.resultRetentionPolicy === "masked",
+        includeAuditEvents: true,
+      })
       await writeTextFile(filePath, content)
       window.alert(t("export_success"))
     } catch (err) {

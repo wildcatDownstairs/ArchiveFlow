@@ -92,6 +92,11 @@ export interface RecoveryProgress {
 
 export type ExportFormat = "csv" | "json"
 
+export interface ExportOptions {
+  maskPasswords?: boolean
+  includeAuditEvents?: boolean
+}
+
 export type AttackMode =
   | { type: "dictionary"; wordlist: string[] }
   | { type: "brute_force"; charset: string; min_length: number; max_length: number }

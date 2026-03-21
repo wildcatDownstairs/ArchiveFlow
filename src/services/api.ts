@@ -6,6 +6,7 @@ import type {
   RecoveryProgress,
   AuditEvent,
   ExportFormat,
+  ExportOptions,
   RecoveryCheckpoint,
   RecoverySchedulerSnapshot,
   ScheduledRecovery,
@@ -163,6 +164,7 @@ export async function getStats(): Promise<[number, number]> {
 export async function exportTasks(
   taskIds: string[],
   format: ExportFormat,
+  options?: ExportOptions,
 ): Promise<string> {
-  return invoke<string>("export_tasks", { taskIds, format })
+  return invoke<string>("export_tasks", { taskIds, format, options: options ?? null })
 }

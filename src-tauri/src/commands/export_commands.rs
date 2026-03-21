@@ -22,6 +22,26 @@ use crate::domain::task::{Task, TaskStatus};
 use crate::errors::AppError;
 use crate::services::audit_service;
 
+/// 导出选项：控制结果是否脱敏、是否附带完整审计事件。
+///
+/// #[serde(default)] 让前端即使不传 options，也会自动回退到默认配置，
+/// 这样旧版本前端依然可以调用这个命令，不会因为字段缺失而报错。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ExportOptions {
+    mask_passwords: bool,
+    include_audit_events: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self {
+            mask_passwords: false,
+            include_audit_events: true,
+        }
+    }
+}
+
 /// 导出文档的元信息，放在 JSON 顶层，方便接收方了解这份数据的来源。
 ///
 /// 【Rust 概念：#[derive(Debug, Clone, serde::Serialize)]】
@@ -42,6 +62,8 @@ struct ExportMetadata {
 struct TaskExportReport {
     status: String,
     found_password: Option<String>,
+    recovery_parameters: Option<String>,
+    failure_reason: Option<String>,
     audit_event_count: usize,
     latest_audit_at: Option<DateTime<Utc>>,
     /// 人类可读的一句话摘要，包含任务名、状态、密码情况、归档详情
@@ -108,6 +130,39 @@ fn status_label(status: &TaskStatus) -> &'static str {
     }
 }
 
+fn mask_password(password: &str) -> String {
+    "•".repeat(password.chars().count())
+}
+
+fn export_password(password: Option<&str>, options: &ExportOptions) -> Option<String> {
+    password.map(|value| {
+        if options.mask_passwords {
+            mask_password(value)
+        } else {
+            value.to_string()
+        }
+    })
+}
+
+fn extract_recovery_parameters(audit_events: &[AuditEvent]) -> Option<String> {
+    audit_events
+        .iter()
+        .find(|event| {
+            matches!(
+                event.event_type,
+                AuditEventType::RecoveryQueued
+                    | AuditEventType::RecoveryStarted
+                    | AuditEventType::RecoveryResumed
+            )
+        })
+        .map(|event| event.description.clone())
+}
+
+fn sanitize_task_for_export(mut task: Task, options: &ExportOptions) -> Task {
+    task.found_password = export_password(task.found_password.as_deref(), options);
+    task
+}
+
 /// 为一个任务构建导出报告（TaskExportReport）。
 ///
 /// 从任务和其审计事件中提炼出人类可读的摘要信息。
@@ -120,14 +175,22 @@ fn status_label(status: &TaskStatus) -> &'static str {
 /// 【Rust 概念：.filter() + .count() 惰性链式迭代】
 ///   `info.entries.iter().filter(|entry| entry.is_encrypted).count()`
 ///   不创建临时集合，直接统计满足条件的元素数量，内存高效。
-fn build_task_report(task: &Task, audit_events: &[AuditEvent]) -> TaskExportReport {
+fn build_task_report(
+    task: &Task,
+    audit_events: &[AuditEvent],
+    options: &ExportOptions,
+) -> TaskExportReport {
     // 审计事件列表按时间倒序（最新在前），所以 .first() 即最近一次事件
     let latest_audit_at = audit_events.first().map(|event| event.timestamp);
+    let recovery_parameters = extract_recovery_parameters(audit_events);
+    let failure_reason = task.error_message.clone();
+    let exported_password = export_password(task.found_password.as_deref(), options);
 
     // 密码摘要：有密码显示密码，无密码给出说明
-    let password_summary = match task.found_password.as_deref() {
+    let password_summary = match exported_password.as_deref() {
+        Some(password) if options.mask_passwords => format!("已导出脱敏密码 `{password}`"),
         Some(password) => format!("已恢复密码 `{password}`"),
-        None => "未导出明文密码".to_string(),
+        None => "未导出密码".to_string(),
     };
 
     // 归档内容摘要：统计总条目数和加密条目数
@@ -150,21 +213,33 @@ fn build_task_report(task: &Task, audit_events: &[AuditEvent]) -> TaskExportRepo
     let latest_event_summary = latest_audit_at
         .map(|ts| format!("最近审计时间 {}", ts.to_rfc3339()))
         .unwrap_or_else(|| "无审计事件".to_string());
+    let recovery_parameter_summary = recovery_parameters
+        .as_deref()
+        .map(|summary| format!("恢复参数摘要：{summary}"))
+        .unwrap_or_else(|| "无恢复参数摘要".to_string());
+    let failure_summary = failure_reason
+        .as_deref()
+        .map(|reason| format!("失败原因：{reason}"))
+        .unwrap_or_else(|| "无失败原因".to_string());
 
     TaskExportReport {
         status: task.status.as_str().to_string(),
-        found_password: task.found_password.clone(),
+        found_password: exported_password,
+        recovery_parameters,
+        failure_reason,
         audit_event_count: audit_events.len(),
         latest_audit_at,
         // 组合成一句完整的人类可读摘要
         // 注意：这里用了中文的弯引号 \u{201c}...\u{201d} 把文件名括起来，
         // 不能直接用 " 因为那是字符串边界符，需要转义或改用其他符号。
         summary: format!(
-            "任务\u{201c}{}\u{201d}当前状态为{}；{}；{}；{}。",
+            "任务\u{201c}{}\u{201d}当前状态为{}；{}；{}；{}；{}；{}。",
             task.file_name,
             status_label(&task.status),
             password_summary,
             archive_summary,
+            recovery_parameter_summary,
+            failure_summary,
             latest_event_summary
         ),
     }
@@ -187,16 +262,22 @@ fn build_task_report(task: &Task, audit_events: &[AuditEvent]) -> TaskExportRepo
 fn build_export_bundles(
     tasks: Vec<Task>,
     audit_events_by_task: Vec<Vec<AuditEvent>>,
+    options: &ExportOptions,
 ) -> Vec<TaskExportBundle> {
     tasks
         .into_iter()
         .zip(audit_events_by_task)
         .map(|(task, audit_events)| {
-            let report = build_task_report(&task, &audit_events);
+            let report = build_task_report(&task, &audit_events, options);
+            let exported_audit_events = if options.include_audit_events {
+                audit_events
+            } else {
+                Vec::new()
+            };
             TaskExportBundle {
-                task,
+                task: sanitize_task_for_export(task, options),
                 report,
-                audit_events,
+                audit_events: exported_audit_events,
             }
         })
         .collect()
@@ -221,6 +302,7 @@ fn build_export_bundles(
 fn load_export_bundles(
     db: &Database,
     task_ids: &[String],
+    options: &ExportOptions,
 ) -> Result<Vec<TaskExportBundle>, AppError> {
     // 根据 task_ids 是否为空决定查询策略
     let tasks = if task_ids.is_empty() {
@@ -242,7 +324,7 @@ fn load_export_bundles(
         .map(|task| db.get_audit_events_for_task(&task.id))
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(build_export_bundles(tasks, audit_events_by_task))
+    Ok(build_export_bundles(tasks, audit_events_by_task, options))
 }
 
 /// 将 TaskExportBundle 列表序列化为 CSV 格式字符串。
@@ -258,7 +340,7 @@ fn bundles_to_csv(bundles: &[TaskExportBundle]) -> String {
     let mut lines = Vec::with_capacity(bundles.len() + 1);
     // 标题行：列名固定，与下方 format! 中的字段顺序严格对应
     lines.push(
-        "id,file_name,file_path,file_size,archive_type,status,created_at,updated_at,found_password,audit_event_count,latest_audit_at,report_summary"
+        "id,file_name,file_path,file_size,archive_type,status,created_at,updated_at,found_password,error_message,recovery_parameters,audit_event_count,latest_audit_at,report_summary"
             .to_string(),
     );
 
@@ -271,7 +353,7 @@ fn bundles_to_csv(bundles: &[TaskExportBundle]) -> String {
             .and_then(|v| v.as_str().map(String::from))
             .unwrap_or_default();
         let row = format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             escape_csv_field(&task.id),
             escape_csv_field(&task.file_name),
             escape_csv_field(&task.file_path),
@@ -282,6 +364,8 @@ fn bundles_to_csv(bundles: &[TaskExportBundle]) -> String {
             escape_csv_field(&task.updated_at.to_rfc3339()),
             // found_password 为 None 时写空字符串
             escape_csv_field(task.found_password.as_deref().unwrap_or("")),
+            escape_csv_field(task.error_message.as_deref().unwrap_or("")),
+            escape_csv_field(bundle.report.recovery_parameters.as_deref().unwrap_or(""),),
             bundle.report.audit_event_count, // usize，纯数字
             escape_csv_field(
                 // latest_audit_at 为 None 时写空字符串
@@ -342,6 +426,7 @@ pub async fn export_tasks(
     db: State<'_, Database>,
     task_ids: Vec<String>,
     format: String,
+    options: Option<ExportOptions>,
 ) -> Result<String, AppError> {
     // 提前验证格式参数，给前端明确的错误信息
     if format != "csv" && format != "json" {
@@ -351,7 +436,8 @@ pub async fn export_tasks(
         )));
     }
 
-    let bundles = load_export_bundles(&db, &task_ids)?;
+    let options = options.unwrap_or_default();
+    let bundles = load_export_bundles(&db, &task_ids, &options)?;
     // 如果指定了 task_ids 但一个都找不到，说明前端传入了无效 ID
     if !task_ids.is_empty() && bundles.is_empty() {
         return Err(AppError::InvalidArgument("未找到可导出的任务".to_string()));
@@ -377,9 +463,19 @@ pub async fn export_tasks(
         AuditEventType::ResultExported,
         target_task_id,
         format!(
-            "导出 {} 条任务恢复结果 (格式: {}, 含报告与审计记录)",
+            "导出 {} 条任务恢复结果 (格式: {}, 密码={}, 审计={})",
             bundles.len(),
-            format
+            format,
+            if options.mask_passwords {
+                "脱敏"
+            } else {
+                "明文"
+            },
+            if options.include_audit_events {
+                "包含"
+            } else {
+                "不包含"
+            }
         ),
     );
 
@@ -397,6 +493,10 @@ mod tests {
     use super::*;
     use crate::domain::archive::ArchiveInfo;
     use crate::domain::task::ArchiveType;
+
+    fn default_export_options() -> ExportOptions {
+        ExportOptions::default()
+    }
 
     /// 构造测试用 Task 的辅助函数，减少测试中的重复代码
     fn make_task(id: &str, name: &str, status: TaskStatus, password: Option<&str>) -> Task {
@@ -441,6 +541,7 @@ mod tests {
             report: build_task_report(
                 &make_task("t1", "demo.zip", TaskStatus::Succeeded, Some("secret")),
                 &[],
+                &default_export_options(),
             ),
             audit_events: vec![],
         }];
@@ -449,10 +550,10 @@ mod tests {
         assert_eq!(lines.len(), 2); // 1 标题 + 1 数据行
         assert_eq!(
             lines[0],
-            "id,file_name,file_path,file_size,archive_type,status,created_at,updated_at,found_password,audit_event_count,latest_audit_at,report_summary"
+            "id,file_name,file_path,file_size,archive_type,status,created_at,updated_at,found_password,error_message,recovery_parameters,audit_event_count,latest_audit_at,report_summary"
         );
         assert!(lines[1].starts_with("t1,demo.zip,/tmp/demo.zip,1024,zip,succeeded,"));
-        assert!(lines[1].contains(",secret,0,,"));
+        assert!(lines[1].contains(",secret,,,0,,"));
     }
 
     /// 验证含特殊字符的字段被正确转义
@@ -468,6 +569,8 @@ mod tests {
         let report = TaskExportReport {
             status: "succeeded".to_string(),
             found_password: task.found_password.clone(),
+            recovery_parameters: Some("恢复参数摘要".to_string()),
+            failure_reason: None,
             audit_event_count: 1,
             latest_audit_at: None,
             summary: "summary,with\"quotes".to_string(),
@@ -498,7 +601,11 @@ mod tests {
         let task = make_task("t1", "demo.zip", TaskStatus::Succeeded, Some("secret"));
         let event = make_event("e1", "t1", "密码恢复成功");
         let bundles = vec![TaskExportBundle {
-            report: build_task_report(&task, std::slice::from_ref(&event)),
+            report: build_task_report(
+                &task,
+                std::slice::from_ref(&event),
+                &default_export_options(),
+            ),
             task,
             audit_events: vec![event],
         }];
@@ -524,11 +631,52 @@ mod tests {
     fn build_task_report_summarizes_audit_and_password() {
         let task = make_task("t1", "demo.zip", TaskStatus::Succeeded, Some("secret"));
         let event = make_event("e1", "t1", "密码恢复成功");
-        let report = build_task_report(&task, &[event]);
+        let report = build_task_report(&task, &[event], &default_export_options());
         assert_eq!(report.audit_event_count, 1);
         assert_eq!(report.found_password.as_deref(), Some("secret"));
         assert!(report.summary.contains("demo.zip"));
         assert!(report.summary.contains("已恢复密码"));
+    }
+
+    #[test]
+    fn build_task_report_masks_password_when_requested() {
+        let task = make_task("t1", "demo.zip", TaskStatus::Succeeded, Some("secret"));
+        let options = ExportOptions {
+            mask_passwords: true,
+            include_audit_events: true,
+        };
+
+        let report = build_task_report(&task, &[], &options);
+
+        assert_eq!(report.found_password.as_deref(), Some("••••••"));
+        assert!(report.summary.contains("已导出脱敏密码"));
+    }
+
+    #[test]
+    fn build_export_bundles_can_omit_audit_payloads() {
+        let task = make_task("t1", "demo.zip", TaskStatus::Succeeded, Some("secret"));
+        let event = AuditEvent {
+            id: "e1".to_string(),
+            event_type: AuditEventType::RecoveryStarted,
+            task_id: Some("t1".to_string()),
+            description: "调度启动密码恢复: demo.zip".to_string(),
+            timestamp: Utc::now(),
+        };
+        let options = ExportOptions {
+            mask_passwords: false,
+            include_audit_events: false,
+        };
+
+        let bundles = build_export_bundles(vec![task], vec![vec![event]], &options);
+
+        assert_eq!(bundles.len(), 1);
+        assert!(bundles[0].audit_events.is_empty());
+        assert!(bundles[0]
+            .report
+            .recovery_parameters
+            .as_deref()
+            .unwrap_or_default()
+            .contains("调度启动密码恢复"));
     }
 
     /// 验证无特殊字符的字段不被转义
