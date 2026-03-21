@@ -36,6 +36,16 @@ pub enum AttackMode {
     Mask { mask: String },
 }
 
+/// 恢复后端：决定这次任务由内置 CPU 引擎还是外部 hashcat 执行。
+///
+/// V1 里 GPU 只是一条新增路径，不会替换原有 CPU 逻辑。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryBackend {
+    Cpu,
+    Gpu,
+}
+
 /// 恢复任务配置：前端发送给后端的启动参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryConfig {
@@ -45,6 +55,10 @@ pub struct RecoveryConfig {
     pub mode: AttackMode,
     /// 调度优先级：写进 checkpoint 后，重启续跑时还能保留原来的队列意图。
     pub priority: i32,
+    /// 本次恢复使用哪个执行后端。
+    pub backend: RecoveryBackend,
+    /// 当 backend=Gpu 时，允许前端传入用户手动指定的 hashcat 路径。
+    pub hashcat_path: Option<String>,
 }
 
 /// 恢复断点：用于应用重启后继续上一次恢复
@@ -137,6 +151,10 @@ pub struct ScheduledRecovery {
     pub mode: AttackMode,
     /// 优先级，数字越大越先执行
     pub priority: i32,
+    /// 调度时应走哪条执行后端。
+    pub backend: RecoveryBackend,
+    /// 仅 GPU 路径使用的 hashcat 路径覆盖项。
+    pub hashcat_path: Option<String>,
     /// 当前调度状态
     pub state: ScheduledRecoveryState,
     /// 进入调度器的时间
@@ -224,6 +242,8 @@ impl RecoveryScheduler {
         task_id: &str,
         mode: AttackMode,
         priority: i32,
+        backend: RecoveryBackend,
+        hashcat_path: Option<String>,
     ) -> Result<ScheduledRecovery, SchedulerError> {
         let mut inner = self.inner.lock().unwrap();
         if inner.tasks.contains_key(task_id) {
@@ -234,6 +254,8 @@ impl RecoveryScheduler {
             task_id: task_id.to_string(),
             mode,
             priority,
+            backend,
+            hashcat_path,
             state: ScheduledRecoveryState::Queued,
             requested_at: Utc::now(),
             started_at: None,
@@ -464,7 +486,8 @@ impl RecoveryManager {
 #[cfg(test)]
 mod tests {
     use super::{
-        AttackMode, RecoveryManager, RecoveryScheduler, ScheduledRecoveryState, SchedulerError,
+        AttackMode, RecoveryBackend, RecoveryManager, RecoveryScheduler, ScheduledRecoveryState,
+        SchedulerError,
     };
     use chrono::{Duration, Utc};
 
@@ -555,8 +578,12 @@ mod tests {
         let mode = AttackMode::Mask {
             mask: "?d?d".to_string(),
         };
-        scheduler.enqueue("task-low", mode.clone(), 1).unwrap();
-        scheduler.enqueue("task-high", mode, 10).unwrap();
+        scheduler
+            .enqueue("task-low", mode.clone(), 1, RecoveryBackend::Cpu, None)
+            .unwrap();
+        scheduler
+            .enqueue("task-high", mode, 10, RecoveryBackend::Cpu, None)
+            .unwrap();
 
         let dispatched = scheduler.take_dispatchable_tasks();
         assert_eq!(dispatched.len(), 1);
@@ -574,6 +601,8 @@ mod tests {
                     wordlist: vec!["secret".to_string()],
                 },
                 0,
+                RecoveryBackend::Cpu,
+                None,
             )
             .unwrap();
 
@@ -591,9 +620,13 @@ mod tests {
             mask: "?d".to_string(),
         };
 
-        assert!(scheduler.enqueue("task-1", mode.clone(), 0).is_ok());
+        assert!(
+            scheduler
+                .enqueue("task-1", mode.clone(), 0, RecoveryBackend::Cpu, None)
+                .is_ok()
+        );
         assert_eq!(
-            scheduler.enqueue("task-1", mode, 1),
+            scheduler.enqueue("task-1", mode, 1, RecoveryBackend::Cpu, None),
             Err(SchedulerError::AlreadyScheduled)
         );
     }
@@ -611,8 +644,12 @@ mod tests {
         let mode = AttackMode::Mask {
             mask: "?d?d".to_string(),
         };
-        scheduler.enqueue("task-old-low", mode.clone(), 1).unwrap();
-        scheduler.enqueue("task-new-high", mode, 3).unwrap();
+        scheduler
+            .enqueue("task-old-low", mode.clone(), 1, RecoveryBackend::Cpu, None)
+            .unwrap();
+        scheduler
+            .enqueue("task-new-high", mode, 3, RecoveryBackend::Cpu, None)
+            .unwrap();
 
         {
             let mut inner = scheduler.inner.lock().unwrap();
@@ -631,8 +668,12 @@ mod tests {
         let mode = AttackMode::Dictionary {
             wordlist: vec!["secret".to_string()],
         };
-        scheduler.enqueue("task-low", mode.clone(), 0).unwrap();
-        scheduler.enqueue("task-high", mode, 1).unwrap();
+        scheduler
+            .enqueue("task-low", mode.clone(), 0, RecoveryBackend::Cpu, None)
+            .unwrap();
+        scheduler
+            .enqueue("task-high", mode, 1, RecoveryBackend::Cpu, None)
+            .unwrap();
 
         {
             let mut inner = scheduler.inner.lock().unwrap();
@@ -643,5 +684,27 @@ mod tests {
         let snapshot = scheduler.snapshot();
         assert_eq!(snapshot.tasks[0].task_id, "task-low");
         assert_eq!(snapshot.tasks[1].task_id, "task-high");
+    }
+
+    #[test]
+    fn scheduler_preserves_backend_metadata() {
+        let scheduler = RecoveryScheduler::new();
+        let scheduled = scheduler
+            .enqueue(
+                "task-gpu",
+                AttackMode::Mask {
+                    mask: "?d?d".to_string(),
+                },
+                4,
+                RecoveryBackend::Gpu,
+                Some("C:/tools/hashcat/hashcat.exe".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(scheduled.backend, RecoveryBackend::Gpu);
+        assert_eq!(
+            scheduled.hashcat_path.as_deref(),
+            Some("C:/tools/hashcat/hashcat.exe")
+        );
     }
 }

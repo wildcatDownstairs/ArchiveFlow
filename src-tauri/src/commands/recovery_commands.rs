@@ -5,12 +5,13 @@ use tauri::{command, AppHandle, Manager, State};
 use crate::db::Database;
 use crate::domain::audit::AuditEventType;
 use crate::domain::recovery::{
-    AttackMode, RecoveryCheckpoint, RecoveryConfig, RecoveryManager, RecoveryScheduler,
-    RecoverySchedulerSnapshot, ScheduledRecovery, ScheduledRecoveryState,
+    AttackMode, RecoveryBackend, RecoveryCheckpoint, RecoveryConfig, RecoveryManager,
+    RecoveryScheduler, RecoverySchedulerSnapshot, ScheduledRecovery, ScheduledRecoveryState,
 };
 use crate::domain::task::{ArchiveType, TaskStatus};
 use crate::errors::AppError;
 use crate::services::audit_service;
+use crate::services::hashcat_service::{self, HashcatDetectionResult};
 use crate::services::recovery_service::{self, RecoveryResult};
 
 fn supports_password_recovery(archive_type: &ArchiveType) -> bool {
@@ -36,6 +37,24 @@ fn describe_attack_mode(mode: &AttackMode) -> String {
             max_length
         ),
         AttackMode::Mask { mask } => format!("掩码攻击 (模式: {})", mask),
+    }
+}
+
+fn describe_backend(backend: &RecoveryBackend) -> &'static str {
+    match backend {
+        RecoveryBackend::Cpu => "内置 CPU",
+        RecoveryBackend::Gpu => "外部 GPU (hashcat)",
+    }
+}
+
+fn parse_recovery_backend(backend: Option<&str>) -> Result<RecoveryBackend, AppError> {
+    match backend.unwrap_or("cpu") {
+        "cpu" => Ok(RecoveryBackend::Cpu),
+        "gpu" => Ok(RecoveryBackend::Gpu),
+        other => Err(AppError::InvalidArgument(format!(
+            "不支持的恢复后端: {}",
+            other
+        ))),
     }
 }
 
@@ -167,9 +186,10 @@ fn dispatch_scheduled_recoveries(app_handle: &AppHandle) {
             AuditEventType::RecoveryStarted,
             Some(scheduled.task_id.clone()),
             format!(
-                "调度启动密码恢复: {} ({:?}, {}, 优先级 {})",
+                "调度启动密码恢复: {} ({:?}, {}, {}, 优先级 {})",
                 task.file_name,
                 task.archive_type,
+                describe_backend(&scheduled.backend),
                 describe_attack_mode(&scheduled.mode),
                 scheduled.priority
             ),
@@ -183,6 +203,8 @@ fn dispatch_scheduled_recoveries(app_handle: &AppHandle) {
                 task_id: scheduled.task_id.clone(),
                 mode: scheduled.mode.clone(),
                 priority: scheduled.priority,
+                backend: scheduled.backend.clone(),
+                hashcat_path: scheduled.hashcat_path.clone(),
             },
             cancel_flag,
             app_handle.clone(),
@@ -202,13 +224,22 @@ fn spawn_recovery_worker(
     app_handle: AppHandle,
 ) {
     std::thread::spawn(move || {
-        let result = recovery_service::run_recovery(
-            config,
-            file_path,
-            archive_type,
-            app_handle.clone(),
-            cancel_flag,
-        );
+        let result = match config.backend {
+            RecoveryBackend::Cpu => recovery_service::run_recovery(
+                config,
+                file_path,
+                archive_type,
+                app_handle.clone(),
+                cancel_flag,
+            ),
+            RecoveryBackend::Gpu => hashcat_service::run_gpu_recovery(
+                config,
+                file_path,
+                archive_type,
+                app_handle.clone(),
+                cancel_flag,
+            ),
+        };
 
         let db = app_handle.state::<Database>();
         let recovery_mgr = app_handle.state::<RecoveryManager>();
@@ -322,6 +353,8 @@ pub async fn start_recovery(
     mode: String,
     config_json: String,
     priority: Option<i32>,
+    backend: Option<String>,
+    hashcat_path: Option<String>,
     db: State<'_, Database>,
     scheduler: State<'_, RecoveryScheduler>,
     app_handle: AppHandle,
@@ -356,8 +389,42 @@ pub async fn start_recovery(
     }
 
     let attack_mode = parse_attack_mode(&mode, &config_json)?;
+    let recovery_backend = parse_recovery_backend(backend.as_deref())?;
+    let normalized_hashcat_path = hashcat_path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if recovery_backend == RecoveryBackend::Gpu {
+        if task.archive_type != ArchiveType::Zip {
+            return Err(AppError::InvalidArgument(
+                "GPU 恢复当前仅支持 ZIP AES/WinZip，请改用 CPU".to_string(),
+            ));
+        }
+
+        let hashcat_info = hashcat_service::detect_hashcat(
+            normalized_hashcat_path
+                .as_deref()
+                .map(std::path::Path::new),
+        )
+        .map_err(AppError::InvalidArgument)?;
+        if !hashcat_info.has_usable_gpu() {
+            return Err(AppError::InvalidArgument(
+                "未检测到可用 GPU 设备，无法启动 hashcat 恢复".to_string(),
+            ));
+        }
+
+        hashcat_service::extract_zip_hash(std::path::Path::new(&task.file_path))
+            .map_err(AppError::InvalidArgument)?;
+    }
+
     scheduler
-        .enqueue(&task_id, attack_mode.clone(), priority.unwrap_or(0))
+        .enqueue(
+            &task_id,
+            attack_mode.clone(),
+            priority.unwrap_or(0),
+            recovery_backend.clone(),
+            normalized_hashcat_path.clone(),
+        )
         .map_err(|_| AppError::InvalidArgument(format!("该任务已在调度队列中: {}", task_id)))?;
 
     dispatch_scheduled_recoveries(&app_handle);
@@ -373,9 +440,10 @@ pub async fn start_recovery(
             AuditEventType::RecoveryQueued,
             Some(task_id.clone()),
             format!(
-                "恢复任务已入队: {} ({:?}, {}, 优先级 {})",
+                "恢复任务已入队: {} ({:?}, {}, {}, 优先级 {})",
                 task.file_name,
                 task.archive_type,
+                describe_backend(&recovery_backend),
                 describe_attack_mode(&attack_mode),
                 priority.unwrap_or(0)
             ),
@@ -393,8 +461,11 @@ pub async fn start_recovery(
 
 #[cfg(test)]
 mod tests {
-    use super::{can_start_recovery, describe_attack_mode, supports_password_recovery};
-    use crate::domain::recovery::AttackMode;
+    use super::{
+        can_start_recovery, describe_attack_mode, parse_recovery_backend,
+        supports_password_recovery,
+    };
+    use crate::domain::recovery::{AttackMode, RecoveryBackend};
     use crate::domain::task::{ArchiveType, TaskStatus};
 
     #[test]
@@ -441,6 +512,15 @@ mod tests {
     #[test]
     fn interrupted_task_can_resume() {
         assert!(can_start_recovery(&TaskStatus::Interrupted));
+    }
+
+    #[test]
+    fn parse_recovery_backend_defaults_to_cpu() {
+        assert_eq!(parse_recovery_backend(None).unwrap(), RecoveryBackend::Cpu);
+        assert_eq!(
+            parse_recovery_backend(Some("gpu")).unwrap(),
+            RecoveryBackend::Gpu
+        );
     }
 }
 
@@ -496,7 +576,13 @@ pub async fn resume_recovery(
     }
 
     scheduler
-        .enqueue(&task_id, checkpoint.mode.clone(), checkpoint.priority)
+        .enqueue(
+            &task_id,
+            checkpoint.mode.clone(),
+            checkpoint.priority,
+            RecoveryBackend::Cpu,
+            None,
+        )
         .map_err(|_| AppError::InvalidArgument(format!("该任务已在调度队列中: {}", task_id)))?;
 
     dispatch_scheduled_recoveries(&app_handle);
@@ -608,6 +694,12 @@ pub async fn pause_recovery(
         .get_task(&task_id)
         .ok_or_else(|| AppError::InvalidArgument("当前任务不在调度器中".to_string()))?;
 
+    if scheduled.backend == RecoveryBackend::Gpu {
+        return Err(AppError::InvalidArgument(
+            "GPU 恢复当前不支持暂停/继续，请直接取消后重新开始".to_string(),
+        ));
+    }
+
     let _ = scheduler.pause(&task_id);
     if scheduled.state == ScheduledRecoveryState::Running {
         if !recovery_manager.cancel(&task_id) {
@@ -627,4 +719,14 @@ pub async fn pause_recovery(
     }
 
     Ok(())
+}
+
+#[command]
+pub async fn detect_hashcat(custom_path: Option<String>) -> Result<HashcatDetectionResult, AppError> {
+    let normalized = custom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::path::Path::new);
+    Ok(hashcat_service::detect_hashcat_for_ui(normalized))
 }

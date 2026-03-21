@@ -26,6 +26,7 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
         crate::commands::audit_commands::clear_audit_events,
         crate::commands::audit_commands::record_setting_change,
         crate::commands::recovery_commands::start_recovery,
+        crate::commands::recovery_commands::detect_hashcat,
         crate::commands::recovery_commands::get_recovery_checkpoint,
         crate::commands::recovery_commands::get_scheduled_recovery,
         crate::commands::recovery_commands::get_recovery_scheduler_snapshot,
