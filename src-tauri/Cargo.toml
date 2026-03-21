@@ -1,6 +1,6 @@
 [package]
 name = "archive-flow"
-version = "26.3.21+build.1"
+version = "26.3.21+build.2"
 description = "加密压缩包访问辅助工具 - Encrypted Archive Access Assistant"
 authors = ["ArchiveFlow"]
 license = "MIT"

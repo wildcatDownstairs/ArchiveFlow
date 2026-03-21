@@ -1,12 +1,4 @@
-/**
- * @fileoverview 文件功能：实现 TaskDetailPage 页面组件
- * @author ArchiveFlow Team
- * @created 2026-03-21
- * @modified 2026-03-21
- * @dependencies react, react-router-dom, react-i18next, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
- */
-
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -17,43 +9,27 @@ import {
   File,
   Loader2,
   Trash2,
-  HardDrive,
-  Files,
   ShieldCheck,
   ShieldAlert,
   Download,
-  Zap,
   ChevronDown,
   ChevronRight,
 } from "lucide-react"
 import { save, ask } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
-import { cn } from "@/lib/utils"
 import { useAppStore } from "@/stores/appStore"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatFileSize, formatDateTime, buildExportFileName } from "@/lib/format"
 import { buildFileTree, type TreeNode } from "@/lib/fileTree"
-import { exportTasks } from "@/services/api"
+import {
+  DANGER_BUTTON_CLASS,
+  GHOST_BUTTON_CLASS,
+  TASK_STATUS_BADGE_CLASSES,
+  TASK_TYPE_BADGE_CLASSES,
+} from "@/lib/ui"
+import { exportTasks, getTaskAuditEvents } from "@/services/api"
 import RecoveryPanel from "@/components/RecoveryPanel"
-import type { Task, ExportFormat } from "@/types"
-
-const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
-  ready: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
-  processing: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
-  succeeded: "bg-green-500/15 text-green-700 dark:text-green-400",
-  exhausted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  cancelled: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
-  failed: "bg-red-500/15 text-red-700 dark:text-red-400",
-  unsupported: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
-  interrupted: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-}
-
-const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
-  zip: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  sevenz: "bg-green-500/15 text-green-700 dark:text-green-400",
-  rar: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-  unknown: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
-}
+import type { AuditEvent, ExportFormat, Task } from "@/types"
 
 const EXPORTABLE_STATUSES: Task["status"][] = [
   "succeeded",
@@ -63,34 +39,32 @@ const EXPORTABLE_STATUSES: Task["status"][] = [
   "interrupted",
 ]
 
-const EXPORT_BUTTON_CLASS_NAME =
-  "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-
-/**
- *
- * @param root0
- * @param root0.node
- * @param root0.t
-  * @returns {JSX.Element} 渲染的 React 元素
- */
-function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string }) {
+function FileTreeNode({
+  node,
+  t,
+}: {
+  node: TreeNode
+  t: (key: string) => string
+}) {
   const [expanded, setExpanded] = useState(true)
 
   if (node.isDirectory) {
     return (
       <div>
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-2 py-1 px-2 w-full text-left hover:bg-muted/50 rounded text-sm"
+          className="flex w-full items-center gap-2 rounded-[10px] px-2 py-2 text-left text-sm transition-colors hover:bg-secondary"
         >
-          <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
-          <span className="font-medium">{node.name}</span>
-          <span className="text-xs text-muted-foreground ml-auto">
+          <Folder className="h-4 w-4 flex-shrink-0 text-amber-300" />
+          <span className="truncate text-foreground">{node.name}</span>
+          <span className="ml-auto text-xs text-muted-foreground">
             {node.children.length} {t("items")}
           </span>
         </button>
+
         {expanded && node.children.length > 0 && (
-          <div className="ml-4 border-l border-gray-200 pl-2">
+          <div className="ml-4 border-l border-white/6 pl-2">
             {node.children.map((child) => (
               <FileTreeNode key={child.path} node={child} t={t} />
             ))}
@@ -101,15 +75,14 @@ function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string 
   }
 
   const entry = node.entry
+
   return (
-    <div className="flex items-center gap-2 py-1 px-2 text-sm hover:bg-muted/50 rounded">
-      <File className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-      <span className="truncate flex-1">{node.name}</span>
-      {entry?.is_encrypted && (
-        <Lock className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-      )}
+    <div className="flex items-center gap-2 rounded-[10px] px-2 py-2 text-sm transition-colors hover:bg-secondary">
+      <File className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">{node.name}</span>
+      {entry?.is_encrypted && <Lock className="h-3.5 w-3.5 flex-shrink-0 text-amber-300" />}
       {entry && (
-        <span className="text-xs text-muted-foreground flex-shrink-0">
+        <span className="flex-shrink-0 text-xs text-muted-foreground">
           {formatFileSize(entry.size)}
         </span>
       )}
@@ -117,10 +90,6 @@ function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string 
   )
 }
 
-/**
- * 该方法/组件暂无详细描述，由自动脚本补充
- * @returns {any} 默认返回
- */
 export default function TaskDetailPage() {
   const { t } = useTranslation()
   const { taskId } = useParams<{ taskId: string }>()
@@ -130,9 +99,7 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isFileTreeExpanded, setIsFileTreeExpanded] = useState(true)
-  const [auditEvents, setAuditEvents] = useState<import("@/types").AuditEvent[]>([])
-
-
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
 
   const loadTask = useCallback(async (id: string) => {
     setLoading(true)
@@ -143,45 +110,49 @@ export default function TaskDetailPage() {
     }
   }, [fetchTask])
 
+  const loadAuditEvents = useCallback(async (id: string) => {
+    try {
+      const events = await getTaskAuditEvents(id)
+      setAuditEvents(events.slice(0, 5))
+    } catch {
+      setAuditEvents([])
+    }
+  }, [])
+
   useEffect(() => {
     if (!taskId) return
     void loadTask(taskId)
-  }, [taskId, loadTask])
+    void loadAuditEvents(taskId)
+  }, [taskId, loadTask, loadAuditEvents])
 
-  // 恢复状态变化时刷新任务数据
   const handleRecoveryStatusChange = useCallback(() => {
-    if (taskId) {
-      // 延迟一点让后端 DB 更新完成
-      setTimeout(() => void fetchTask(taskId), 500)
-    }
-  }, [taskId, fetchTask])
+    if (!taskId) return
 
-  /**
- * 该方法/组件暂无详细描述，由自动脚本补充
- * @returns {any} 默认返回
- */
+    setTimeout(() => {
+      void fetchTask(taskId)
+      void loadAuditEvents(taskId)
+    }, 500)
+  }, [taskId, fetchTask, loadAuditEvents])
+
   const handleDelete = async () => {
     if (!taskId) return
     const confirmed = await ask(t("delete_confirm"), { kind: "warning" })
     if (!confirmed) return
+
     setIsDeleting(true)
     try {
       await removeTask(taskId)
       navigate("/tasks")
-    } catch (err) {
-      console.error("Failed to delete task:", err)
+    } catch (error) {
+      console.error("Failed to delete task:", error)
     } finally {
       setIsDeleting(false)
     }
   }
 
-  /**
-   *
-   * @param format
-    * @returns {any} 执行结果
- */
-const handleExport = async (format: ExportFormat) => {
+  const handleExport = async (format: ExportFormat) => {
     if (!currentTask) return
+
     const defaultName = buildExportFileName(format, currentTask.file_name)
     const ext = format === "csv" ? "csv" : "json"
 
@@ -198,15 +169,15 @@ const handleExport = async (format: ExportFormat) => {
       })
       await writeTextFile(filePath, content)
       window.alert(t("export_success"))
-    } catch (err) {
-      console.error("Export failed:", err)
+    } catch (error) {
+      console.error("Export failed:", error)
       window.alert(t("export_error"))
     }
   }
 
   if (loading) {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+      <div className="af-page flex items-center gap-2 text-muted-foreground">
         <Loader2 className="h-5 w-5 animate-spin" />
         <span>{t("loading")}</span>
       </div>
@@ -215,15 +186,15 @@ const handleExport = async (format: ExportFormat) => {
 
   if (!currentTask) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="af-page space-y-4">
         <button
           onClick={() => navigate("/tasks")}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           {t("back_to_tasks")}
         </button>
-        <p className="text-muted-foreground">{t("task_not_found")}</p>
+        <p className="text-sm text-muted-foreground">{t("task_not_found")}</p>
       </div>
     )
   }
@@ -239,231 +210,232 @@ const handleExport = async (format: ExportFormat) => {
     !!info?.is_encrypted
 
   return (
-    <div className="p-6 space-y-6">
-      {/* 导航 */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={() => navigate("/tasks")}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t("back_to_tasks")}
-        </button>
-        <div className="flex items-center gap-2">
-          {canExportTask && (
-            <>
-              <button
-                onClick={() => void handleExport("json")}
-                className={EXPORT_BUTTON_CLASS_NAME}
-                title={t("export_results") + " (JSON)"}
-              >
-                <Download className="h-4 w-4 text-amber-500" />
-                JSON
-              </button>
-              <button
-                onClick={() => void handleExport("csv")}
-                className={EXPORT_BUTTON_CLASS_NAME}
-                title={t("export_results") + " (CSV)"}
-              >
-                <Download className="h-4 w-4 text-amber-500" />
-                CSV
-              </button>
-            </>
-          )}
+    <div className="af-page af-scrollbar-none overflow-y-auto">
+      <div className="mx-auto max-w-[1320px]">
+        <div className="flex flex-col gap-4 border-b border-white/6 pb-5 xl:flex-row xl:items-center xl:justify-between">
           <button
-            onClick={() => void handleDelete()}
-            disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => navigate("/tasks")}
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
-            {isDeleting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            {t("delete")}
+            <ArrowLeft className="h-4 w-4" />
+            {t("back_to_tasks")}
           </button>
-        </div>
-      </div>
 
-      {/* 标题 */}
-      <div className="flex items-center gap-3">
-        <FileArchive className="h-8 w-8 text-muted-foreground" />
-        <div>
-          <h1 className="text-2xl font-bold">{task.file_name}</h1>
-          <p className="text-sm text-muted-foreground break-all">
-            {task.file_path}
-          </p>
-        </div>
-      </div>
+          <div className="flex flex-wrap gap-2">
+            {canExportTask && (
+              <>
+                <button
+                  onClick={() => void handleExport("json")}
+                  className={GHOST_BUTTON_CLASS}
+                >
+                  <Download className="h-4 w-4 text-primary" />
+                  JSON
+                </button>
+                <button
+                  onClick={() => void handleExport("csv")}
+                  className={GHOST_BUTTON_CLASS}
+                >
+                  <Download className="h-4 w-4 text-primary" />
+                  CSV
+                </button>
+              </>
+            )}
 
-      {/* 主体内容：主区 + 右侧边栏 */}
-      <div className="flex flex-col xl:flex-row gap-6 items-start">
-        {/* 主区域：密码恢复面板 - 仅在有加密文件时显示 */}
-        {hasRecoveryPanel && (
-          <div className="flex flex-col gap-6 flex-1 min-w-0">
-            <RecoveryPanel
-              task={task}
-              onTaskStatusChange={handleRecoveryStatusChange}
-              onAuditEventsChange={setAuditEvents}
-            />
+            <button
+              onClick={() => void handleDelete()}
+              disabled={isDeleting}
+              className={`${DANGER_BUTTON_CLASS} min-w-[92px]`}
+            >
+              {isDeleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              {t("delete")}
+            </button>
           </div>
-        )}
+        </div>
 
-        {/* 右侧侧边栏：元信息 + 文件树 */}
-        <aside className={cn(
-          "flex-shrink-0 flex flex-col gap-4",
-          hasRecoveryPanel ? "w-full xl:w-72" : "w-full"
-        )}>
-          {/* 元信息卡片 */}
-          <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-sm">
-              {/* 类型 */}
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <FileArchive className="h-3.5 w-3.5 flex-shrink-0" />
-                {t("file_type")}
-              </span>
-              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold w-fit", TYPE_BADGE_COLORS[task.archive_type])}>
-                {t(`type_${task.archive_type}`)}
-              </span>
+        <div className="mt-7 flex flex-col gap-7 xl:flex-row">
+          <div className="min-w-0 flex-1">
+            <div className="mb-6 flex items-start gap-4">
+              <div className="mt-1 flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-[14px] bg-primary/14 text-primary">
+                <FileArchive className="h-5 w-5" />
+              </div>
 
-              {/* 状态 */}
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <Zap className="h-3.5 w-3.5 flex-shrink-0" />
-                {t("file_status")}
-              </span>
-              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold w-fit", STATUS_BADGE_COLORS[task.status])}>
-                {t(`status_${task.status}`)}
-              </span>
+              <div className="min-w-0">
+                <h1 className="af-display break-all text-[22px] font-bold text-foreground">
+                  {task.file_name}
+                </h1>
+                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                  {task.file_path}
+                </p>
+              </div>
+            </div>
 
-              {/* 大小 */}
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5 flex-shrink-0" />
-                {t("file_size")}
-              </span>
-              <span className="font-medium">{formatFileSize(task.file_size)}</span>
-
-              {/* 加密状态 */}
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" />
-                {t("encryption")}
-              </span>
-              <span>
-                {info ? (
-                  info.is_encrypted ? (
-                    <span className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-500">
+            <div className="af-panel mb-5 flex flex-wrap items-center gap-4 px-5 py-4 text-sm text-muted-foreground">
+              <StatusMeta
+                label={t("file_status")}
+                value={<span className={TASK_STATUS_BADGE_CLASSES[task.status]}>{t(`status_${task.status}`)}</span>}
+              />
+              <span className="text-muted-foreground/40">•</span>
+              <StatusMeta
+                label={t("file_type")}
+                value={<span className={TASK_TYPE_BADGE_CLASSES[task.archive_type]}>{t(`type_${task.archive_type}`)}</span>}
+              />
+              <span className="text-muted-foreground/40">•</span>
+              <StatusMeta
+                label={t("encryption")}
+                value={
+                  info?.is_encrypted ? (
+                    <span className="inline-flex items-center gap-1.5 text-amber-300">
                       <ShieldAlert className="h-3.5 w-3.5" />
                       {t("encrypted")}
                     </span>
                   ) : (
-                    <span className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-500">
+                    <span className="inline-flex items-center gap-1.5 text-emerald-300">
                       <ShieldCheck className="h-3.5 w-3.5" />
                       {t("not_encrypted")}
                     </span>
                   )
-                ) : (
-                  <span className="text-muted-foreground">-</span>
-                )}
-              </span>
-
-              {info && (
-                <>
-                  {/* 总文件数 */}
-                  <span className="text-muted-foreground flex items-center gap-1.5">
-                    <Files className="h-3.5 w-3.5 flex-shrink-0" />
-                    {t("total_entries")}
-                  </span>
-                  <span className="font-medium">{info.total_entries}</span>
-
-                  {/* 解压大小 */}
-                  <span className="text-muted-foreground flex items-center gap-1.5">
-                    <HardDrive className="h-3.5 w-3.5 flex-shrink-0" />
-                    {t("uncompressed_size")}
-                  </span>
-                  <span className="font-medium">{formatFileSize(info.total_size)}</span>
-
-                  {/* 加密文件数 */}
-                  <span className="text-muted-foreground flex items-center gap-1.5">
-                    <Lock className="h-3.5 w-3.5 flex-shrink-0" />
-                    {t("encrypted_entries")}
-                  </span>
-                  <span className="font-medium">
-                    <span className={info.entries.some((e) => e.is_encrypted) ? "text-amber-600 dark:text-amber-500" : ""}>
-                      {info.entries.filter((e) => e.is_encrypted).length}
-                    </span>
-                    <span className="text-muted-foreground font-normal">
-                      {" / "}{info.entries.filter((e) => !e.is_directory).length}
-                    </span>
-                  </span>
-                </>
-              )}
+                }
+              />
+              <span className="text-muted-foreground/40">•</span>
+              <StatusMeta
+                label={t("total_entries")}
+                value={<span className="text-foreground">{info?.total_entries ?? 0}</span>}
+              />
             </div>
 
-            {/* 分割线 + 时间信息 */}
-            <div className="border-t pt-3 space-y-1.5 text-xs text-muted-foreground">
-              <div className="flex justify-between gap-2">
-                <span>{t("created_at")}</span>
-                <span className="text-right font-medium text-foreground">{formatDateTime(task.created_at)}</span>
+            {task.error_message && (
+              <div className="mb-5 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-200">
+                {task.error_message}
               </div>
-              <div className="flex justify-between gap-2">
-                <span>{t("updated_at")}</span>
-                <span className="text-right font-medium text-foreground">{formatDateTime(task.updated_at)}</span>
+            )}
+
+            {hasRecoveryPanel && (
+              <div className="af-panel p-5">
+                <RecoveryPanel
+                  task={task}
+                  onTaskStatusChange={handleRecoveryStatusChange}
+                  onAuditEventsChange={setAuditEvents}
+                />
               </div>
-            </div>
+            )}
           </div>
 
-          {/* 错误信息 */}
-          {task.error_message && (
-            <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
-              {task.error_message}
+          <aside className="w-full flex-shrink-0 space-y-6 xl:w-[280px]">
+            <div className="af-panel p-5">
+              <div className="mb-4 af-kicker">文件信息</div>
+              <InfoRow
+                label={t("file_type")}
+                value={<span className={TASK_TYPE_BADGE_CLASSES[task.archive_type]}>{t(`type_${task.archive_type}`)}</span>}
+              />
+              <InfoRow
+                label={t("file_status")}
+                value={<span className={TASK_STATUS_BADGE_CLASSES[task.status]}>{t(`status_${task.status}`)}</span>}
+              />
+              <InfoRow label={t("file_size")} value={formatFileSize(task.file_size)} />
+              <InfoRow
+                label={t("encryption")}
+                value={
+                  info?.is_encrypted ? (
+                    <span className="text-amber-300">{t("encrypted")}</span>
+                  ) : (
+                    <span className="text-emerald-300">{t("not_encrypted")}</span>
+                  )
+                }
+              />
+              {info && (
+                <>
+                  <InfoRow label={t("total_entries")} value={info.total_entries} />
+                  <InfoRow label={t("uncompressed_size")} value={formatFileSize(info.total_size)} />
+                  <InfoRow
+                    label={t("encrypted_entries")}
+                    value={`${info.entries.filter((entry) => entry.is_encrypted).length} / ${info.entries.filter((entry) => !entry.is_directory).length}`}
+                  />
+                </>
+              )}
+              <InfoRow label={t("created_at")} value={formatDateTime(task.created_at)} />
+              <InfoRow label={t("updated_at")} value={formatDateTime(task.updated_at)} />
             </div>
-          )}
 
-          {/* 最近审计事件（仅恢复任务） */}
-          {hasRecoveryPanel && (
-            <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
-              <div className="text-sm font-medium">{t("recent_audit_events")}</div>
+            <div className="af-panel p-5">
+              <div className="mb-4 af-kicker">{t("recent_audit_events")}</div>
               {auditEvents.length === 0 ? (
                 <div className="text-sm text-muted-foreground">{t("no_recent_audit_events")}</div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {auditEvents.map((event) => (
-                    <div key={event.id} className="border-l-2 border-border pl-3">
-                      <div className="text-xs text-muted-foreground">
+                    <div key={event.id} className="border-b border-white/6 pb-4 last:border-b-0 last:pb-0">
+                      <div className="font-mono text-[11px] text-muted-foreground">
                         {formatDateTime(event.timestamp)}
                       </div>
-                      <div className="text-sm leading-snug">{event.description}</div>
+                      <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {event.description}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          )}
 
-          {/* 归档内容（可折叠，仅在有条目时显示） */}
-          {info && info.entries.length > 0 && (
-            <section className="space-y-2">
-              <button
-                onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
-                className="flex items-center gap-2 text-sm font-semibold hover:text-indigo-600 transition-colors focus:outline-none w-full text-left"
-              >
-                {isFileTreeExpanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
+            {info && info.entries.length > 0 && (
+              <div className="af-panel p-5">
+                <button
+                  onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <div className="af-kicker">{t("archive_contents")}</div>
+                  {isFileTreeExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+
+                {isFileTreeExpanded && (
+                  <div className="af-panel-soft mt-4 max-h-[320px] overflow-y-auto p-3">
+                    {fileTree.map((node) => (
+                      <FileTreeNode key={node.path} node={node} t={t} />
+                    ))}
+                  </div>
                 )}
-                {t("archive_contents")}
-              </button>
-              {isFileTreeExpanded && (
-                <div className="max-h-64 rounded-lg border bg-card p-3 overflow-y-auto">
-                  {fileTree.map((node) => (
-                    <FileTreeNode key={node.path} node={node} t={t} />
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-        </aside>
+              </div>
+            )}
+          </aside>
+        </div>
       </div>
+    </div>
+  )
+}
+
+function StatusMeta({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
+  return (
+    <div className="inline-flex items-center gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      {value}
+    </div>
+  )
+}
+
+function InfoRow({
+  label,
+  value,
+}: {
+  label: string
+  value: ReactNode
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-white/6 py-3 last:border-b-0 last:pb-0 first:pt-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-right text-sm font-medium text-foreground">{value}</span>
     </div>
   )
 }

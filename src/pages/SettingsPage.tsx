@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Globe,
@@ -6,8 +6,8 @@ import {
   Database,
   Info,
   ExternalLink,
-  Languages,
   SlidersHorizontal,
+  Search,
 } from "lucide-react"
 import {
   useAppStore,
@@ -23,6 +23,8 @@ import {
   recordSettingChange,
   setRecoverySchedulerLimit,
 } from "@/services/api"
+import { cn } from "@/lib/utils"
+import { DANGER_BUTTON_CLASS, GHOST_BUTTON_CLASS } from "@/lib/ui"
 import type { HashcatDetectionResult } from "@/types"
 
 function stringifySetting(value: unknown): string {
@@ -32,9 +34,9 @@ function stringifySetting(value: unknown): string {
 
 export default function SettingsPage() {
   const { t, i18n } = useTranslation()
-  const setLocale = useAppStore((s) => s.setLocale)
-  const recoveryPreferences = useAppStore((s) => s.recoveryPreferences)
-  const updateRecoveryPreferences = useAppStore((s) => s.updateRecoveryPreferences)
+  const setLocale = useAppStore((state) => state.setLocale)
+  const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
+  const updateRecoveryPreferences = useAppStore((state) => state.updateRecoveryPreferences)
 
   const [appDataDir, setAppDataDir] = useState("")
   const [taskCount, setTaskCount] = useState(0)
@@ -50,7 +52,7 @@ export default function SettingsPage() {
       setTaskCount(tasks)
       setAuditCount(audits)
     } catch {
-      // Ignore stats loading errors in the settings UI.
+      // Ignore stats loading failures in the settings view.
     }
   }
 
@@ -109,7 +111,11 @@ export default function SettingsPage() {
     }
   }, [recoveryPreferences.hashcatPath, updateRecoveryPreferences])
 
-  const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
+  const persistSettingChange = async (
+    key: string,
+    oldValue: unknown,
+    newValue: unknown,
+  ) => {
     try {
       await recordSettingChange(
         key,
@@ -120,6 +126,8 @@ export default function SettingsPage() {
       // Ignore audit write failures in the settings UI.
     }
   }
+
+  const currentLang = i18n.language
 
   const handleLanguageChange = async (lng: string) => {
     if (lng === currentLang) return
@@ -235,7 +243,7 @@ export default function SettingsPage() {
       await loadStats()
       setConfirmAction(null)
     } catch {
-      // Ignore
+      // Ignore clear failures in this UI.
     }
   }
 
@@ -245,407 +253,689 @@ export default function SettingsPage() {
       await loadStats()
       setConfirmAction(null)
     } catch {
-      // Ignore
+      // Ignore clear failures in this UI.
     }
   }
 
-  const currentLang = i18n.language
+  return (
+    <div className="af-page af-scrollbar-none overflow-y-auto">
+      <div className="mx-auto max-w-[1240px]">
+        <div className="border-b border-white/6 pb-5">
+          <h1 className="af-page-title">{t("settings")}</h1>
+        </div>
+
+        <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.9fr)]">
+          <div className="space-y-4">
+            <SettingsCard
+              icon={<SlidersHorizontal className="h-4 w-4" />}
+              title={t("recovery_defaults")}
+            >
+              <CardRow>
+                <FieldLabel>{t("default_charset")}</FieldLabel>
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      ["lowercase", t("charset_lowercase")],
+                      ["uppercase", t("charset_uppercase")],
+                      ["digits", t("charset_digits")],
+                      ["special", t("charset_special")],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <CharsetTag
+                      key={key}
+                      label={label}
+                      checked={recoveryPreferences.defaultCharsetFlags[key]}
+                      onChange={(checked) =>
+                        void handleCharsetFlagChange(key, checked)
+                      }
+                    />
+                  ))}
+                </div>
+              </CardRow>
+
+              <SplitRow>
+                <SplitCell>
+                  <FieldLabel>{t("default_min_length")}</FieldLabel>
+                  <NumberInput
+                    value={recoveryPreferences.defaultMinLength}
+                    min={1}
+                    max={16}
+                    onChange={(value) =>
+                      void handleNumericPreferenceChange("defaultMinLength", value)
+                    }
+                  />
+                </SplitCell>
+                <SplitCell>
+                  <FieldLabel>{t("default_max_length")}</FieldLabel>
+                  <NumberInput
+                    value={recoveryPreferences.defaultMaxLength}
+                    min={1}
+                    max={16}
+                    onChange={(value) =>
+                      void handleNumericPreferenceChange("defaultMaxLength", value)
+                    }
+                  />
+                </SplitCell>
+              </SplitRow>
+
+              <CardRow horizontal>
+                <FieldLabel compact>{t("default_task_priority")}</FieldLabel>
+                <div className="flex items-center gap-3">
+                  <Stepper
+                    value={recoveryPreferences.defaultTaskPriority}
+                    onChange={(value) =>
+                      void handleNumericPreferenceChange("defaultTaskPriority", value)
+                    }
+                    min={-10}
+                    max={10}
+                  />
+                  <span className="max-w-[132px] text-[11px] leading-5 text-muted-foreground">
+                    {t("default_task_priority_hint")}
+                  </span>
+                </div>
+              </CardRow>
+
+              <SplitRow>
+                <SplitCell>
+                  <FieldLabel>{t("max_concurrent_recoveries")}</FieldLabel>
+                  <NumberInput
+                    value={recoveryPreferences.maxConcurrentRecoveries}
+                    min={1}
+                    max={32}
+                    onChange={(value) => void handleSchedulerLimitChange(value)}
+                  />
+                </SplitCell>
+                <SplitCell>
+                  <FieldLabel>{t("hashcat_path")}</FieldLabel>
+                  <input
+                    type="text"
+                    value={hashcatPathInput}
+                    placeholder={t("hashcat_path_placeholder")}
+                    onChange={(event) => setHashcatPathInput(event.target.value)}
+                    onBlur={() => void handleHashcatPathCommit()}
+                    className="af-input font-mono text-xs"
+                    title={hashcatPathInput}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleDetectHashcat()}
+                    disabled={hashcatChecking}
+                    className={`${GHOST_BUTTON_CLASS} mt-2 px-3 py-1.5 text-xs`}
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                    {hashcatChecking ? t("loading") : t("detect_hashcat")}
+                  </button>
+                  {hashcatStatus && (
+                    <HashcatStatusPanel status={hashcatStatus} />
+                  )}
+                </SplitCell>
+              </SplitRow>
+
+              <SplitRow>
+                <SplitCell className="p-0">
+                  <CheckItem
+                    checked={recoveryPreferences.autoIncludeFilenamePatterns}
+                    onChange={(checked) =>
+                      void handleBooleanPreferenceChange("autoIncludeFilenamePatterns", checked)
+                    }
+                    label={t("include_filename_patterns")}
+                  />
+                </SplitCell>
+                <SplitCell className="p-0">
+                  <CheckItem
+                    checked={recoveryPreferences.autoClearDictionaryInput}
+                    onChange={(checked) =>
+                      void handleBooleanPreferenceChange("autoClearDictionaryInput", checked)
+                    }
+                    label={t("auto_clear_dictionary_input")}
+                  />
+                </SplitCell>
+              </SplitRow>
+
+              <SplitRow noBorder>
+                <SplitCell>
+                  <FieldLabel>{t("result_retention_policy")}</FieldLabel>
+                  <div className="space-y-1">
+                    <RadioItem
+                      name="retention"
+                      checked={recoveryPreferences.resultRetentionPolicy === "plaintext"}
+                      onChange={() => void handleRetentionPolicyChange("plaintext")}
+                      label={t("retention_plaintext")}
+                      compact
+                    />
+                    <RadioItem
+                      name="retention"
+                      checked={recoveryPreferences.resultRetentionPolicy === "masked"}
+                      onChange={() => void handleRetentionPolicyChange("masked")}
+                      label={t("retention_masked")}
+                      compact
+                    />
+                  </div>
+                </SplitCell>
+                <SplitCell>
+                  <FieldLabel>{t("export_defaults")}</FieldLabel>
+                  <div className="space-y-1">
+                    <CheckItem
+                      checked={recoveryPreferences.exportMaskPasswords}
+                      onChange={(checked) =>
+                        void handleBooleanPreferenceChange("exportMaskPasswords", checked)
+                      }
+                      label={t("export_mask_passwords")}
+                      compact
+                    />
+                    <CheckItem
+                      checked={recoveryPreferences.exportIncludeAuditEvents}
+                      onChange={(checked) =>
+                        void handleBooleanPreferenceChange("exportIncludeAuditEvents", checked)
+                      }
+                      label={t("export_include_audit_events")}
+                      compact
+                    />
+                  </div>
+                </SplitCell>
+              </SplitRow>
+            </SettingsCard>
+          </div>
+
+          <div className="space-y-4">
+            <SettingsCard
+              icon={<Globe className="h-4 w-4" />}
+              title={t("language")}
+            >
+              <RadioItem
+                name="language"
+                checked={currentLang === "zh"}
+                onChange={() => void handleLanguageChange("zh")}
+                label={t("language_zh")}
+                prefix={<span className="text-sm">🇨🇳</span>}
+              />
+              <RadioItem
+                name="language"
+                checked={currentLang === "en"}
+                onChange={() => void handleLanguageChange("en")}
+                label={t("language_en")}
+                prefix={<span className="text-sm">🇺🇸</span>}
+                noBorder
+              />
+            </SettingsCard>
+
+            <SettingsCard
+              icon={<Database className="h-4 w-4" />}
+              title={t("data_management")}
+            >
+              {appDataDir && (
+                <div className="border-b border-white/6 px-5 py-3 font-mono text-[11.5px] leading-5 text-muted-foreground break-all">
+                  {appDataDir}
+                </div>
+              )}
+
+              <div className="flex gap-7 border-b border-white/6 px-5 py-4">
+                <StatBlock label={t("task_count")} value={taskCount} />
+                <StatBlock label={t("audit_count")} value={auditCount} />
+              </div>
+
+              <div className="px-5 py-4">
+                <div className="flex flex-wrap gap-2">
+                  {confirmAction === "tasks" ? (
+                    <ConfirmDanger
+                      text={t("clear_tasks_confirm")}
+                      confirmLabel={t("clear_all_tasks")}
+                      cancelLabel={t("cancel")}
+                      onConfirm={() => void handleClearTasks()}
+                      onCancel={() => setConfirmAction(null)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setConfirmAction("tasks")}
+                      disabled={taskCount === 0}
+                      className={`${DANGER_BUTTON_CLASS} px-3.5 py-2 text-xs ${taskCount === 0 ? "pointer-events-none opacity-50" : ""}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t("clear_all_tasks")}
+                    </button>
+                  )}
+
+                  {confirmAction === "audit" ? (
+                    <ConfirmDanger
+                      text={t("clear_audit_confirm")}
+                      confirmLabel={t("clear_audit_logs")}
+                      cancelLabel={t("cancel")}
+                      onConfirm={() => void handleClearAudit()}
+                      onCancel={() => setConfirmAction(null)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setConfirmAction("audit")}
+                      disabled={auditCount === 0}
+                      className={`${DANGER_BUTTON_CLASS} px-3.5 py-2 text-xs ${auditCount === 0 ? "pointer-events-none opacity-50" : ""}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {t("clear_audit_logs")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </SettingsCard>
+
+            <SettingsCard
+              icon={<Info className="h-4 w-4" />}
+              title={t("about")}
+            >
+              <AboutRow
+                label={t("version")}
+                value={<span className="font-mono text-[13px]">v0.1.0</span>}
+              />
+              <AboutRow
+                label={t("tech_stack")}
+                value={
+                  <span className="text-[12.5px] text-muted-foreground">
+                    Tauri 2 + React + TypeScript + Rust + SQLite
+                  </span>
+                }
+              />
+              <AboutRow
+                label={t("github_repo")}
+                value={
+                  <a
+                    href="https://github.com/wildcatDownstairs/ArchiveFlow"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-primary transition-colors hover:text-primary/80"
+                  >
+                    ArchiveFlow
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                }
+                noBorder
+              />
+            </SettingsCard>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SettingsCard({
+  icon,
+  title,
+  children,
+}: {
+  icon: ReactNode
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <section className="overflow-hidden rounded-[14px] border border-white/6 bg-card">
+      <div className="flex items-center gap-2 border-b border-white/6 px-5 py-4">
+        <span className="text-primary">{icon}</span>
+        <h2 className="af-display text-[13px] font-bold text-foreground">{title}</h2>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function CardRow({
+  children,
+  horizontal = false,
+}: {
+  children: ReactNode
+  horizontal?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "border-b border-white/6 px-5 py-4",
+        horizontal && "flex items-center justify-between gap-4",
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SplitRow({
+  children,
+  noBorder = false,
+}: {
+  children: ReactNode
+  noBorder?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "grid md:grid-cols-2",
+        !noBorder && "border-b border-white/6",
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SplitCell({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("px-5 py-4 md:border-l md:first:border-l-0 md:border-white/6", className)}>
+      {children}
+    </div>
+  )
+}
+
+function FieldLabel({
+  children,
+  compact = false,
+}: {
+  children: ReactNode
+  compact?: boolean
+}) {
+  return (
+    <div className={cn("af-kicker mb-2", compact && "mb-0")}>
+      {children}
+    </div>
+  )
+}
+
+function CharsetTag({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-center gap-2 rounded-[8px] px-3 py-2 transition-colors",
+        checked
+          ? "bg-primary/15 text-primary"
+          : "bg-secondary text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only"
+      />
+      <span
+        className={cn(
+          "h-[5px] w-[5px] rounded-full",
+          checked ? "bg-primary" : "bg-muted-foreground/45",
+        )}
+      />
+      <span className="text-[12.5px]">{label}</span>
+    </label>
+  )
+}
+
+function NumberInput({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number
+  min: number
+  max: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <input
+      type="number"
+      value={value}
+      min={min}
+      max={max}
+      onChange={(event) => onChange(parseInt(event.target.value, 10) || min)}
+      className="af-input text-sm"
+    />
+  )
+}
+
+function Stepper({
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+}) {
+  return (
+    <div className="inline-flex items-center overflow-hidden rounded-[8px] bg-secondary">
+      <button
+        type="button"
+        className="flex h-[34px] w-8 items-center justify-center text-base text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={() => onChange(Math.max(min, value - 1))}
+      >
+        −
+      </button>
+      <span className="min-w-[34px] text-center text-sm font-medium text-foreground">
+        {value}
+      </span>
+      <button
+        type="button"
+        className="flex h-[34px] w-8 items-center justify-center text-base text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        onClick={() => onChange(Math.min(max, value + 1))}
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
+function CheckItem({
+  checked,
+  onChange,
+  label,
+  compact = false,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+  compact?: boolean
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-white/[0.02]",
+        !compact && "border-b border-white/6 last:border-b-0",
+        compact && "px-0 py-2",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only"
+      />
+      <span
+        className={cn(
+          "flex h-4 w-4 items-center justify-center rounded-[4px] transition-colors",
+          checked ? "bg-primary" : "bg-secondary",
+        )}
+      >
+        {checked && (
+          <svg width="7" height="5" viewBox="0 0 9 6" fill="none">
+            <path
+              d="M1 3L3.5 5.5L8 1"
+              stroke="white"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
+      </span>
+      <span className={cn("text-[13px]", checked ? "text-foreground" : "text-muted-foreground")}>
+        {label}
+      </span>
+    </label>
+  )
+}
+
+function RadioItem({
+  name,
+  checked,
+  onChange,
+  label,
+  prefix,
+  compact = false,
+  noBorder = false,
+}: {
+  name: string
+  checked: boolean
+  onChange: () => void
+  label: string
+  prefix?: ReactNode
+  compact?: boolean
+  noBorder?: boolean
+}) {
+  return (
+    <label
+      className={cn(
+        "flex cursor-pointer items-center gap-3 px-5 py-3 transition-colors hover:bg-white/[0.02]",
+        !compact && !noBorder && "border-b border-white/6",
+        compact && "px-0 py-2",
+      )}
+    >
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        onChange={onChange}
+        className="sr-only"
+      />
+      <span
+        className={cn(
+          "flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors",
+          checked ? "border-primary" : "border-muted-foreground/45",
+        )}
+      >
+        {checked && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+      </span>
+      {prefix}
+      <span className={cn("text-[13px]", checked ? "text-foreground" : "text-muted-foreground")}>
+        {label}
+      </span>
+    </label>
+  )
+}
+
+function HashcatStatusPanel({
+  status,
+}: {
+  status: HashcatDetectionResult
+}) {
+  const { t } = useTranslation()
 
   return (
-    <div className="p-6 space-y-8 max-w-3xl">
-      <h1 className="text-2xl font-bold">{t("settings")}</h1>
+    <div className="af-panel-soft mt-3 space-y-2 p-3 text-xs">
+      <div className={status.available ? "text-emerald-300" : "text-amber-300"}>
+        {status.available
+          ? t("hashcat_detected")
+          : status.error ?? t("hashcat_not_detected")}
+      </div>
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Globe className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">{t("language")}</h2>
+      {status.version && (
+        <div className="text-muted-foreground">
+          {t("version")}: {status.version}
         </div>
-        <div className="rounded-lg border p-4 space-y-3">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="radio"
-              name="language"
-              value="zh"
-              checked={currentLang === "zh"}
-              onChange={() => void handleLanguageChange("zh")}
-              className="h-4 w-4 accent-primary"
-            />
-            <Languages className="h-4 w-4 text-muted-foreground" />
-            <span>{t("language_zh")}</span>
-          </label>
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="radio"
-              name="language"
-              value="en"
-              checked={currentLang === "en"}
-              onChange={() => void handleLanguageChange("en")}
-              className="h-4 w-4 accent-primary"
-            />
-            <Languages className="h-4 w-4 text-muted-foreground" />
-            <span>{t("language_en")}</span>
-          </label>
+      )}
+
+      {status.path && (
+        <div className="break-all font-mono text-[11px] text-muted-foreground">
+          {status.path}
         </div>
-      </section>
+      )}
 
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <SlidersHorizontal className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">{t("recovery_defaults")}</h2>
+      {status.devices.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[11px] text-muted-foreground">{t("hashcat_devices")}</div>
+          <ul className="space-y-1 text-[11px] text-muted-foreground">
+            {status.devices.map((device) => (
+              <li key={`${device.id}-${device.name}`}>
+                #{device.id} {device.name} ({device.device_type})
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="rounded-lg border p-4 space-y-5">
-          <div className="space-y-2">
-            <p className="text-sm font-medium">{t("default_charset")}</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-              {(
-                [
-                  ["lowercase", t("charset_lowercase")],
-                  ["uppercase", t("charset_uppercase")],
-                  ["digits", t("charset_digits")],
-                  ["special", t("charset_special")],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={recoveryPreferences.defaultCharsetFlags[key]}
-                    onChange={(e) => void handleCharsetFlagChange(key, e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
+      )}
+    </div>
+  )
+}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">{t("default_min_length")}</label>
-              <input
-                type="number"
-                value={recoveryPreferences.defaultMinLength}
-                min={1}
-                max={16}
-                onChange={(e) =>
-                  void handleNumericPreferenceChange(
-                    "defaultMinLength",
-                    parseInt(e.target.value, 10) || 1,
-                  )
-                }
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">{t("default_max_length")}</label>
-              <input
-                type="number"
-                value={recoveryPreferences.defaultMaxLength}
-                min={1}
-                max={16}
-                onChange={(e) =>
-                  void handleNumericPreferenceChange(
-                    "defaultMaxLength",
-                    parseInt(e.target.value, 10) || 1,
-                  )
-                }
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-          </div>
+function StatBlock({
+  label,
+  value,
+}: {
+  label: string
+  value: number
+}) {
+  return (
+    <div>
+      <div className="af-kicker mb-1">{label}</div>
+      <div className="af-stat-number text-[22px] font-bold text-foreground">{value}</div>
+    </div>
+  )
+}
 
-          <div className="space-y-1">
-            <label className="text-sm font-medium">{t("default_task_priority")}</label>
-            <input
-              type="number"
-              value={recoveryPreferences.defaultTaskPriority}
-              min={-10}
-              max={10}
-              onChange={(e) =>
-                void handleNumericPreferenceChange(
-                  "defaultTaskPriority",
-                  parseInt(e.target.value, 10) || 0,
-                )
-              }
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <p className="text-xs text-muted-foreground">{t("default_task_priority_hint")}</p>
-          </div>
+function ConfirmDanger({
+  text,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
+}: {
+  text: string
+  confirmLabel: string
+  cancelLabel: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="w-full rounded-xl border border-rose-400/18 bg-rose-400/8 p-4">
+      <p className="text-sm text-rose-200">{text}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={onConfirm} className={`${DANGER_BUTTON_CLASS} px-3 py-2 text-xs`}>
+          {confirmLabel}
+        </button>
+        <button onClick={onCancel} className={`${GHOST_BUTTON_CLASS} px-3 py-2 text-xs`}>
+          {cancelLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
 
-          <div className="space-y-2 rounded-lg border border-dashed p-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">{t("hashcat_path")}</label>
-              <input
-                type="text"
-                value={hashcatPathInput}
-                placeholder={t("hashcat_path_placeholder")}
-                onChange={(e) => {
-                  setHashcatPathInput(e.target.value)
-                }}
-                onBlur={() => void handleHashcatPathCommit()}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <p className="text-xs text-muted-foreground">{t("hashcat_path_hint")}</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void handleDetectHashcat()}
-                disabled={hashcatChecking}
-                className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {hashcatChecking ? t("loading") : t("detect_hashcat")}
-              </button>
-              {hashcatStatus?.version && (
-                <span className="text-sm text-muted-foreground">
-                  {t("version")}: {hashcatStatus.version}
-                </span>
-              )}
-            </div>
-            {hashcatStatus && (
-              <div className="space-y-2 text-sm">
-                <div className={hashcatStatus.available ? "text-green-600" : "text-amber-600"}>
-                  {hashcatStatus.available
-                    ? t("hashcat_detected")
-                    : hashcatStatus.error ?? t("hashcat_not_detected")}
-                </div>
-                {hashcatStatus.path && (
-                  <div className="text-xs text-muted-foreground font-mono break-all">
-                    {hashcatStatus.path}
-                  </div>
-                )}
-                {hashcatStatus.devices.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">{t("hashcat_devices")}</div>
-                    <ul className="space-y-1 text-xs text-muted-foreground">
-                      {hashcatStatus.devices.map((device) => (
-                        <li key={`${device.id}-${device.name}`}>
-                          #{device.id} {device.name} ({device.device_type})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2 text-sm">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={recoveryPreferences.autoIncludeFilenamePatterns}
-                onChange={(e) =>
-                  void handleBooleanPreferenceChange(
-                    "autoIncludeFilenamePatterns",
-                    e.target.checked,
-                  )
-                }
-                className="rounded border-gray-300"
-              />
-              {t("include_filename_patterns")}
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={recoveryPreferences.autoClearDictionaryInput}
-                onChange={(e) =>
-                  void handleBooleanPreferenceChange(
-                    "autoClearDictionaryInput",
-                    e.target.checked,
-                  )
-                }
-                className="rounded border-gray-300"
-              />
-              {t("auto_clear_dictionary_input")}
-            </label>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">{t("result_retention_policy")}</p>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="resultRetentionPolicy"
-                checked={recoveryPreferences.resultRetentionPolicy === "plaintext"}
-                onChange={() => void handleRetentionPolicyChange("plaintext")}
-                className="h-4 w-4 accent-primary"
-              />
-              {t("retention_plaintext")}
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input
-                type="radio"
-                name="resultRetentionPolicy"
-                checked={recoveryPreferences.resultRetentionPolicy === "masked"}
-                onChange={() => void handleRetentionPolicyChange("masked")}
-                className="h-4 w-4 accent-primary"
-              />
-              {t("retention_masked")}
-            </label>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-sm font-medium">{t("max_concurrent_recoveries")}</label>
-            <input
-              type="number"
-              value={recoveryPreferences.maxConcurrentRecoveries}
-              min={1}
-              max={32}
-              onChange={(e) =>
-                void handleSchedulerLimitChange(parseInt(e.target.value, 10) || 1)
-              }
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">{t("export_defaults")}</p>
-            <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={recoveryPreferences.exportMaskPasswords}
-                onChange={(e) =>
-                  void handleBooleanPreferenceChange(
-                    "exportMaskPasswords",
-                    e.target.checked,
-                  )
-                }
-                className="rounded border-gray-300"
-              />
-              {t("export_mask_passwords")}
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={recoveryPreferences.exportIncludeAuditEvents}
-                onChange={(e) =>
-                  void handleBooleanPreferenceChange(
-                    "exportIncludeAuditEvents",
-                    e.target.checked,
-                  )
-                }
-                className="rounded border-gray-300"
-              />
-              {t("export_include_audit_events")}
-            </label>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Database className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">{t("data_management")}</h2>
-        </div>
-        <div className="rounded-lg border p-4 space-y-4">
-          {appDataDir && (
-            <div className="flex items-start gap-2 text-sm">
-              <span className="text-muted-foreground shrink-0">{t("app_data_dir")}:</span>
-              <span className="break-all font-mono text-xs">{appDataDir}</span>
-            </div>
-          )}
-
-          <div className="flex gap-6 text-sm">
-            <span>
-              {t("task_count")}: <strong>{taskCount}</strong>
-            </span>
-            <span>
-              {t("audit_count")}: <strong>{auditCount}</strong>
-            </span>
-          </div>
-
-          <div className="space-y-2">
-            {confirmAction === "tasks" ? (
-              <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
-                <p className="text-sm text-destructive">{t("clear_tasks_confirm")}</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => void handleClearTasks()}
-                    className="px-3 py-1.5 text-sm rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    {t("clear_all_tasks")}
-                  </button>
-                  <button
-                    onClick={() => setConfirmAction(null)}
-                    className="px-3 py-1.5 text-sm rounded-md border hover:bg-muted"
-                  >
-                    {t("cancel")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmAction("tasks")}
-                disabled={taskCount === 0}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t("clear_all_tasks")}
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            {confirmAction === "audit" ? (
-              <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 space-y-2">
-                <p className="text-sm text-destructive">{t("clear_audit_confirm")}</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => void handleClearAudit()}
-                    className="px-3 py-1.5 text-sm rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  >
-                    {t("clear_audit_logs")}
-                  </button>
-                  <button
-                    onClick={() => setConfirmAction(null)}
-                    className="px-3 py-1.5 text-sm rounded-md border hover:bg-muted"
-                  >
-                    {t("cancel")}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmAction("audit")}
-                disabled={auditCount === 0}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Trash2 className="h-4 w-4" />
-                {t("clear_audit_logs")}
-              </button>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Info className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">{t("about")}</h2>
-        </div>
-        <div className="rounded-lg border p-4 space-y-3 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">{t("version")}:</span>
-            <span className="font-mono">v0.1.0</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="text-muted-foreground shrink-0">{t("tech_stack")}:</span>
-            <span>Tauri 2 + React + TypeScript + Rust + SQLite</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">{t("github_repo")}:</span>
-            <a
-              href="https://github.com/wildcatDownstairs/ArchiveFlow"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-primary hover:underline"
-            >
-              ArchiveFlow
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        </div>
-      </section>
+function AboutRow({
+  label,
+  value,
+  noBorder = false,
+}: {
+  label: string
+  value: ReactNode
+  noBorder?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-start justify-between gap-3 px-5 py-3",
+        !noBorder && "border-b border-white/6",
+      )}
+    >
+      <span className="flex-shrink-0 text-sm text-muted-foreground">{label}</span>
+      <span className="text-right text-sm font-medium text-foreground">{value}</span>
     </div>
   )
 }

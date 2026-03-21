@@ -27,6 +27,9 @@
 - **审计事件** — 操作日志完整记录，前端可按事件类型筛选浏览
 - **结果导出** — 支持 CSV / JSON 导出，包含任务摘要；可按设置默认脱敏密码并选择是否附带审计记录
 - **设置页面** — 语言切换、恢复默认配置、导出默认配置、结果保留策略、数据管理、hashcat 路径配置
+- **全新桌面 UI** — 首页 / 任务管理 / 审计报告 / 设置 四个页面已统一为新的桌面端布局，强调信息层级、卡片分区与更清晰的操作动线
+- **明暗双主题** — 内置浅色 / 深色主题切换，侧栏场景式主题开关支持动画过渡并持久化用户选择
+- **响应式设置中心** — 设置页支持双列到单列自适应布局，在较窄窗口下仍可完整操作
 - **启动画面** — 赛博朋克风格 boot screen，消除启动时白屏
 - **本地 SQLite 持久化** — 所有任务数据与归档元信息存储在本地数据库，无需联网
 - **国际化** — 支持简体中文（默认）与英文切换
@@ -57,6 +60,8 @@ ArchiveFlow/
 │   ├── components/
 │   │   ├── BootScreen.tsx      # 赛博朋克启动画面
 │   │   └── RecoveryPanel.tsx   # 密码恢复面板组件
+│   ├── layouts/
+│   │   └── MainLayout.tsx      # 主框架布局 + 侧栏导航 + 主题切换
 │   ├── pages/
 │   │   ├── HomePage.tsx        # 拖拽导入 + 最近任务
 │   │   ├── TaskPage.tsx        # 任务列表
@@ -68,6 +73,7 @@ ArchiveFlow/
 │   │   └── appStore.ts         # 语言、恢复偏好、UI 状态
 │   ├── lib/
 │   │   ├── format.ts           # 工具函数（formatFileSize / formatElapsed / formatSpeed）
+│   │   ├── ui.ts               # Badge / Button 等前端 UI 样式常量
 │   │   ├── recoveryCandidates.ts  # 字典变换规则
 │   │   └── recoveryObservability.ts  # ETA / 阶段推断
 │   ├── services/api.ts         # Tauri invoke 封装
@@ -108,6 +114,9 @@ npm run tauri dev
 ```bash
 # 前端单元测试（Vitest）
 npm run test:run
+
+# 前端页面/UI 测试
+npm run test:ui
 
 # 代码检查
 npm run lint
@@ -180,6 +189,7 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 - CPU 默认并行度：`max(1, num_cpus::get() - 1)`
 - GPU 单条目大小上限：10 MB（压缩后）
 - 恢复结果与断点默认保存在本地 SQLite；不依赖云端
+- 当前主题系统聚焦桌面端窗口体验，主要适配浅色 / 深色双主题与常见桌面分辨率
 
 ## 测试夹具
 
@@ -220,4 +230,3 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 ## 许可证
 
 MIT
-
