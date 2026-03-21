@@ -101,6 +101,7 @@ export interface RecoveryCheckpoint {
   task_id: string
   mode: AttackMode
   archive_type: Task["archive_type"]
+  priority: number
   tried: number
   total: number
   updated_at: string

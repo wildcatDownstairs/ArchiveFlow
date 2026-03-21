@@ -182,6 +182,7 @@ fn dispatch_scheduled_recoveries(app_handle: &AppHandle) {
             RecoveryConfig {
                 task_id: scheduled.task_id.clone(),
                 mode: scheduled.mode.clone(),
+                priority: scheduled.priority,
             },
             cancel_flag,
             app_handle.clone(),
@@ -495,7 +496,7 @@ pub async fn resume_recovery(
     }
 
     scheduler
-        .enqueue(&task_id, checkpoint.mode.clone(), 0)
+        .enqueue(&task_id, checkpoint.mode.clone(), checkpoint.priority)
         .map_err(|_| AppError::InvalidArgument(format!("该任务已在调度队列中: {}", task_id)))?;
 
     dispatch_scheduled_recoveries(&app_handle);
@@ -509,10 +510,11 @@ pub async fn resume_recovery(
         AuditEventType::RecoveryResumed,
         Some(task_id.clone()),
         format!(
-            "继续密码恢复: {} ({:?}, {}, 已尝试 {}/{})",
+            "继续密码恢复: {} ({:?}, {}, 优先级 {}, 已尝试 {}/{})",
             task.file_name,
             task.archive_type,
             describe_attack_mode(&checkpoint.mode),
+            checkpoint.priority,
             checkpoint.tried,
             checkpoint.total
         ),

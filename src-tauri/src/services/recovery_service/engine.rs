@@ -58,6 +58,7 @@ pub(crate) fn persist_recovery_checkpoint(
     task_id: &str,
     mode: &AttackMode,
     archive_type: &ArchiveType,
+    priority: i32,
     tried: u64,
     total: u64,
 ) {
@@ -66,6 +67,7 @@ pub(crate) fn persist_recovery_checkpoint(
         task_id: task_id.to_string(),
         mode: mode.clone(),
         archive_type: archive_type.clone(),
+        priority,
         tried,
         total,
         updated_at: Utc::now(),
@@ -147,6 +149,7 @@ pub fn run_recovery(
         &task_id,
         mode.as_ref(),
         &archive_type,
+        config.priority,
         resume_from,
         total,
     );
@@ -288,6 +291,7 @@ pub fn run_recovery(
                 &task_id,
                 mode.as_ref(),
                 &archive_type,
+                config.priority,
                 current_tried,
                 total,
             );
@@ -331,6 +335,7 @@ pub fn run_recovery(
                 &task_id,
                 mode.as_ref(),
                 &archive_type,
+                config.priority,
                 current_tried,
                 total,
             );

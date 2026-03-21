@@ -7,7 +7,7 @@ use thiserror::Error;
 
 // pub(crate) 意味着这个常量只在当前 crate（整个 src-tauri 库）内可见，
 // 不会暴露给外部。这是比 pub 更精细的可见性控制。
-pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub(crate) const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 // &'static str 是字符串字面量类型：
 //   - 'static 生命周期表示这个字符串在整个程序运行期间都存在（编译进二进制文件）
@@ -51,12 +51,26 @@ const CREATE_AUDIT_EVENTS_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS audit_ev
     timestamp TEXT NOT NULL
 );";
 
-// 恢复断点表（v5 新增）：存储密码恢复的进度，用于断点续传
-const CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL: &str =
+// v5 版本的恢复断点表定义。
+// 当时只保存了“跑到哪里”和“用什么模式跑”，还没有把优先级持久化进去。
+const CREATE_RECOVERY_CHECKPOINTS_TABLE_V5_SQL: &str =
     "CREATE TABLE IF NOT EXISTS recovery_checkpoints (
     task_id TEXT PRIMARY KEY,
     mode_json TEXT NOT NULL,
     archive_type TEXT NOT NULL,
+    tried INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);";
+
+// 最新版本的恢复断点表定义。
+// 新装库直接用它，避免创建后再补列。
+const CREATE_RECOVERY_CHECKPOINTS_TABLE_LATEST_SQL: &str =
+    "CREATE TABLE IF NOT EXISTS recovery_checkpoints (
+    task_id TEXT PRIMARY KEY,
+    mode_json TEXT NOT NULL,
+    archive_type TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
     tried INTEGER NOT NULL,
     total INTEGER NOT NULL,
     updated_at TEXT NOT NULL
@@ -147,6 +161,8 @@ fn detect_schema_version(conn: &Connection) -> Result<u32, rusqlite::Error> {
 ///   - v1: tasks 表存在，但无 found_password、archive_info 列
 ///   - v2: 新增 found_password 列
 ///   - v3: 新增 archive_info 列（可推断为 v3+）
+///   - v5: 新增 recovery_checkpoints 表
+///   - v6: recovery_checkpoints 表新增 priority 列
 fn infer_legacy_version(conn: &Connection) -> Result<u32, rusqlite::Error> {
     // 连 tasks 表都没有 → 空数据库，版本 0
     if !table_exists(conn, "tasks")? {
@@ -155,9 +171,19 @@ fn infer_legacy_version(conn: &Connection) -> Result<u32, rusqlite::Error> {
 
     let has_found_password = column_exists(conn, "tasks", "found_password")?;
     let has_archive_info = column_exists(conn, "tasks", "archive_info")?;
+    let has_checkpoints = table_exists(conn, "recovery_checkpoints")?;
+    let has_checkpoint_priority = if has_checkpoints {
+        column_exists(conn, "recovery_checkpoints", "priority")?
+    } else {
+        false
+    };
 
     // if/else if/else 表达式：Rust 中 if 是表达式，有返回值
-    let version = if has_archive_info {
+    let version = if has_checkpoint_priority {
+        6
+    } else if has_checkpoints {
+        5
+    } else if has_archive_info {
         3
     } else if has_found_password {
         2
@@ -189,6 +215,7 @@ fn apply_migration(conn: &Connection, target_version: u32) -> Result<(), rusqlit
         3 => migrate_to_v3(conn),
         4 => migrate_to_v4(conn),
         5 => migrate_to_v5(conn),
+        6 => migrate_to_v6(conn),
         // unreachable!() 宏：告诉编译器和读者"这里在逻辑上不可能到达"。
         // 如果真的到达了（说明代码有 bug），程序会 panic 并打印消息。
         v => unreachable!("未注册的迁移版本 v{v}；请在 apply_migration 中添加对应分支"),
@@ -200,7 +227,7 @@ fn create_latest_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     // execute_batch 可以一次执行多条 SQL 语句（用分号分隔）
     conn.execute_batch(CREATE_TASKS_TABLE_LATEST_SQL)?;
     conn.execute_batch(CREATE_AUDIT_EVENTS_TABLE_SQL)?;
-    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL)?;
+    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_LATEST_SQL)?;
     conn.execute_batch(CREATE_INDEXES_SQL)?;
     Ok(())
 }
@@ -248,7 +275,20 @@ fn migrate_to_v4(conn: &Connection) -> Result<(), rusqlite::Error> {
 fn migrate_to_v5(conn: &Connection) -> Result<(), rusqlite::Error> {
     // v5 新增恢复断点表。
     // 这里把"上次跑到哪里"的状态从内存搬到数据库里，这样应用重启后还能继续。
-    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_SQL)?;
+    conn.execute_batch(CREATE_RECOVERY_CHECKPOINTS_TABLE_V5_SQL)?;
+    Ok(())
+}
+
+/// v6 迁移：给恢复断点补上 priority 列，确保重启续跑后还能保留原先优先级。
+fn migrate_to_v6(conn: &Connection) -> Result<(), rusqlite::Error> {
+    if !column_exists(conn, "recovery_checkpoints", "priority")? {
+        conn.execute(
+            "ALTER TABLE recovery_checkpoints ADD COLUMN priority INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        log::info!("数据库迁移: 已添加 recovery_checkpoints.priority");
+    }
+
     Ok(())
 }
 

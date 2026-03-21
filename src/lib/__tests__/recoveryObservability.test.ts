@@ -26,6 +26,7 @@ describe("recoveryObservability", () => {
       task_id: "task-1",
       mode: { type: "mask", mask: "?d?d?d?d" },
       archive_type: "zip",
+      priority: 3,
       tried: 100,
       total: 10_000,
       updated_at: "2026-03-21T00:00:00Z",

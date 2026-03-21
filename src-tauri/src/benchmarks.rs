@@ -160,6 +160,7 @@ fn benchmark_checkpoint_writes(iterations: u64) -> BenchmarkSample {
                 task_id: "bench-task".to_string(),
                 mode: mode.clone(),
                 archive_type: ArchiveType::Zip,
+                priority: 0,
                 tried,
                 total: iterations,
                 updated_at: Utc::now(),

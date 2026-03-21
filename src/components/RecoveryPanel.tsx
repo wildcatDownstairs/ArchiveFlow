@@ -199,7 +199,7 @@ export default function RecoveryPanel({
         setCheckpoint(value)
         setScheduledRecovery(scheduled)
         setSchedulerSnapshot(snapshot)
-        setPriority(scheduled?.priority ?? 0)
+        setPriority(scheduled?.priority ?? value?.priority ?? 0)
 
         if (!value) return
         if (value.mode.type === "mask") {
@@ -529,6 +529,12 @@ export default function RecoveryPanel({
             <div className="font-medium">{t("recovery_resume_available")}</div>
             <div className="text-blue-700">
               {t("tried_count")}: {checkpoint.tried.toLocaleString()} / {checkpoint.total.toLocaleString()}
+            </div>
+            <div className="text-blue-700">
+              {t("scheduler_priority")}: {checkpoint.priority}
+            </div>
+            <div className="text-blue-700">
+              {t("last_checkpoint")}: {formatDateTime(checkpoint.updated_at)}
             </div>
           </div>
           <button

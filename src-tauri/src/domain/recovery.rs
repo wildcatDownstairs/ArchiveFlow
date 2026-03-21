@@ -43,6 +43,8 @@ pub struct RecoveryConfig {
     pub task_id: String,
     /// 使用哪种攻击模式
     pub mode: AttackMode,
+    /// 调度优先级：写进 checkpoint 后，重启续跑时还能保留原来的队列意图。
+    pub priority: i32,
 }
 
 /// 恢复断点：用于应用重启后继续上一次恢复
@@ -55,6 +57,9 @@ pub struct RecoveryCheckpoint {
     pub task_id: String,
     /// 继续恢复时要复用的攻击模式
     pub mode: AttackMode,
+    /// 这次恢复原本的调度优先级。
+    /// 如果应用重启后再继续恢复，就用这个值恢复原先的排队权重。
+    pub priority: i32,
     /// 归档类型，用来校验断点是否还匹配当前任务
     pub archive_type: ArchiveType,
     /// 已经尝试过多少个候选

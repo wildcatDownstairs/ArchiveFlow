@@ -4,7 +4,7 @@ import "@/i18n"
 import RecoveryPanel from "@/components/RecoveryPanel"
 import * as api from "@/services/api"
 import { useAppStore } from "@/stores/appStore"
-import type { RecoveryProgress, RecoverySchedulerSnapshot, Task } from "@/types"
+import type { RecoveryCheckpoint, RecoveryProgress, RecoverySchedulerSnapshot, Task } from "@/types"
 
 vi.mock("@/services/api", () => ({
   onRecoveryProgress: vi.fn(),
@@ -39,6 +39,11 @@ const RUNNING_TASK: Task = {
   error_message: null,
   found_password: null,
   archive_info: null,
+}
+
+const READY_TASK: Task = {
+  ...RUNNING_TASK,
+  status: "interrupted",
 }
 
 describe("RecoveryPanel", () => {
@@ -115,5 +120,27 @@ describe("RecoveryPanel", () => {
     expect(
       screen.queryByRole("button", { name: "取消恢复" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("恢复断点卡片会显示上次保存的优先级和时间", async () => {
+    const checkpoint: RecoveryCheckpoint = {
+      task_id: READY_TASK.id,
+      mode: { type: "mask", mask: "?d?d?d?d" },
+      archive_type: "zip",
+      priority: 5,
+      tried: 320,
+      total: 10_000,
+      updated_at: "2026-03-21T08:30:00Z",
+    }
+
+    vi.mocked(api.getRecoveryCheckpoint).mockResolvedValue(checkpoint)
+
+    render(<RecoveryPanel task={READY_TASK} />)
+
+    expect(await screen.findByText("检测到可继续的恢复断点")).toBeInTheDocument()
+    expect(screen.getByText("优先级: 5")).toBeInTheDocument()
+    expect(
+      screen.getByText((content) => content.startsWith("最近断点保存:")),
+    ).toBeInTheDocument()
   })
 })
