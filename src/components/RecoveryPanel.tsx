@@ -20,6 +20,13 @@ import {
   AlertCircle,
   FileUp,
   Loader2,
+  Activity,
+  Layers,
+  Cpu,
+  Microchip,
+  Hash,
+  Timer,
+  Bookmark,
 } from "lucide-react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { readTextFile } from "@tauri-apps/plugin-fs"
@@ -58,6 +65,7 @@ type AttackTab = "dictionary" | "bruteforce" | "mask"
 interface RecoveryPanelProps {
   task: Task
   onTaskStatusChange?: () => void
+  onAuditEventsChange?: (events: AuditEvent[]) => void
 }
 
 /**
@@ -70,6 +78,7 @@ interface RecoveryPanelProps {
 export default function RecoveryPanel({
   task,
   onTaskStatusChange,
+  onAuditEventsChange,
 }: RecoveryPanelProps) {
   const { t } = useTranslation()
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
@@ -108,7 +117,6 @@ export default function RecoveryPanel({
   const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null)
   const [scheduledRecovery, setScheduledRecovery] = useState<ScheduledRecovery | null>(null)
   const [schedulerSnapshot, setSchedulerSnapshot] = useState<RecoverySchedulerSnapshot | null>(null)
-  const [recentAuditEvents, setRecentAuditEvents] = useState<AuditEvent[]>([])
   const [taskStatusOverride, setTaskStatusOverride] = useState<{
     taskId: string
     status: Task["status"]
@@ -157,11 +165,11 @@ export default function RecoveryPanel({
   const refreshAuditEvents = useCallback(async () => {
     try {
       const events = await api.getTaskAuditEvents(task.id)
-      setRecentAuditEvents(events.slice(0, MAX_RECENT_AUDIT_EVENTS))
+      onAuditEventsChange?.(events.slice(0, MAX_RECENT_AUDIT_EVENTS))
     } catch {
-      setRecentAuditEvents([])
+      onAuditEventsChange?.([])
     }
-  }, [task.id])
+  }, [task.id, onAuditEventsChange])
 
   // 监听恢复进度
   useEffect(() => {
@@ -711,70 +719,53 @@ const handleCopy = async (password: string) => {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-lg border p-4 md:p-5 bg-card shadow-sm flex flex-col space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-primary" />
-              {t("recovery_insights")}
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground font-medium">{t("current_stage")}</div>
-              <div className="text-sm font-semibold">{t(stageKey)}</div>
-            </div>
-            
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground font-medium">
-                {backend === "gpu" ? t("gpu_device_count") : t("worker_count")}
-              </div>
-              <div className="text-sm font-semibold">
-                {progress?.worker_count ? progress.worker_count.toLocaleString() : t("not_available")}
-              </div>
-            </div>
-            
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground font-medium">{t("current_parameters")}</div>
-              <div className="text-sm font-semibold break-words">
-                {observedModeDescription ?? t("not_available")}
-              </div>
-            </div>
-            
-            <div className="space-y-1.5">
-              <div className="text-xs text-muted-foreground font-medium">{t("eta")}</div>
-              <div className="text-sm font-semibold">
-                {etaSeconds !== null ? formatElapsed(etaSeconds) : t("not_available")}
-              </div>
-            </div>
-            
-            <div className="space-y-1.5 col-span-2">
-              <div className="text-xs text-muted-foreground font-medium">{t("last_checkpoint")}</div>
-              <div className="text-sm font-semibold text-muted-foreground">
-                {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : t("not_available")}
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* 恢复观测 — 紧凑单行 */}
+      <div className="rounded-lg border bg-card shadow-sm px-4 py-2.5 flex items-center gap-1.5 flex-wrap">
+        <Activity className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+        <span className="text-xs font-medium text-primary mr-1">{t("recovery_insights")}</span>
 
-        <div className="rounded-lg border p-4 space-y-3 bg-card shadow-sm flex flex-col">
-          <div className="text-sm font-medium">{t("recent_audit_events")}</div>
-          {recentAuditEvents.length === 0 ? (
-            <div className="text-sm text-muted-foreground">{t("no_recent_audit_events")}</div>
-          ) : (
-            <div className="space-y-3">
-              {recentAuditEvents.map((event) => (
-                <div key={event.id} className="border-l-2 border-border pl-3">
-                  <div className="text-xs text-muted-foreground">
-                    {formatDateTime(event.timestamp)}
-                  </div>
-                  <div className="text-sm leading-6">{event.description}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <span className="text-muted-foreground text-xs select-none">·</span>
+
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Layers className="h-3 w-3 flex-shrink-0" />
+          <span className="text-foreground font-medium">{t(stageKey)}</span>
+        </span>
+
+        <span className="text-muted-foreground text-xs select-none">·</span>
+
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          {backend === "gpu" ? <Microchip className="h-3 w-3 flex-shrink-0" /> : <Cpu className="h-3 w-3 flex-shrink-0" />}
+          <span className="text-foreground font-medium">
+            {progress?.worker_count ? progress.worker_count.toLocaleString() : "—"}
+          </span>
+        </span>
+
+        <span className="text-muted-foreground text-xs select-none">·</span>
+
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Hash className="h-3 w-3 flex-shrink-0" />
+          <span className="text-foreground font-medium font-mono truncate max-w-[140px]" title={observedModeDescription ?? undefined}>
+            {observedModeDescription ?? "—"}
+          </span>
+        </span>
+
+        <span className="text-muted-foreground text-xs select-none">·</span>
+
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Timer className="h-3 w-3 flex-shrink-0" />
+          <span className="text-foreground font-medium">
+            {etaSeconds !== null ? formatElapsed(etaSeconds) : "—"}
+          </span>
+        </span>
+
+        <span className="text-muted-foreground text-xs select-none">·</span>
+
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Bookmark className="h-3 w-3 flex-shrink-0" />
+          <span className="text-foreground font-medium">
+            {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : "—"}
+          </span>
+        </span>
       </div>
 
       {/* 结果展示 - 如果找到密码 */}

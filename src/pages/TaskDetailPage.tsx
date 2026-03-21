@@ -130,6 +130,7 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isFileTreeExpanded, setIsFileTreeExpanded] = useState(true)
+  const [auditEvents, setAuditEvents] = useState<import("@/types").AuditEvent[]>([])
 
 
 
@@ -303,6 +304,7 @@ const handleExport = async (format: ExportFormat) => {
             <RecoveryPanel
               task={task}
               onTaskStatusChange={handleRecoveryStatusChange}
+              onAuditEventsChange={setAuditEvents}
             />
           </div>
         )}
@@ -413,6 +415,27 @@ const handleExport = async (format: ExportFormat) => {
           {task.error_message && (
             <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
               {task.error_message}
+            </div>
+          )}
+
+          {/* 最近审计事件（仅恢复任务） */}
+          {hasRecoveryPanel && (
+            <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
+              <div className="text-sm font-medium">{t("recent_audit_events")}</div>
+              {auditEvents.length === 0 ? (
+                <div className="text-sm text-muted-foreground">{t("no_recent_audit_events")}</div>
+              ) : (
+                <div className="space-y-3">
+                  {auditEvents.map((event) => (
+                    <div key={event.id} className="border-l-2 border-border pl-3">
+                      <div className="text-xs text-muted-foreground">
+                        {formatDateTime(event.timestamp)}
+                      </div>
+                      <div className="text-sm leading-snug">{event.description}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
