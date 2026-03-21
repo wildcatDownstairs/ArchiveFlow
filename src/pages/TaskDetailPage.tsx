@@ -167,8 +167,8 @@ export default function TaskDetailPage() {
 
     try {
       const content = await exportTasks([currentTask.id], format, {
-        maskPasswords: recoveryPreferences.resultRetentionPolicy === "masked",
-        includeAuditEvents: true,
+        maskPasswords: recoveryPreferences.exportMaskPasswords,
+        includeAuditEvents: recoveryPreferences.exportIncludeAuditEvents,
       })
       await writeTextFile(filePath, content)
       window.alert(t("export_success"))

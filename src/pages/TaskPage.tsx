@@ -87,8 +87,8 @@ export default function TaskPage() {
     try {
       const ids = exportableTasks.map((t) => t.id)
       const content = await exportTasks(ids, format, {
-        maskPasswords: recoveryPreferences.resultRetentionPolicy === "masked",
-        includeAuditEvents: true,
+        maskPasswords: recoveryPreferences.exportMaskPasswords,
+        includeAuditEvents: recoveryPreferences.exportIncludeAuditEvents,
       })
       await writeTextFile(filePath, content)
       window.alert(t("export_success"))

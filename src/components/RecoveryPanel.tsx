@@ -92,7 +92,7 @@ export default function RecoveryPanel({
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
-  const [priority, setPriority] = useState(0)
+  const [priority, setPriority] = useState(recoveryPreferences.defaultTaskPriority)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -199,7 +199,11 @@ export default function RecoveryPanel({
         setCheckpoint(value)
         setScheduledRecovery(scheduled)
         setSchedulerSnapshot(snapshot)
-        setPriority(scheduled?.priority ?? value?.priority ?? 0)
+        setPriority(
+          scheduled?.priority ??
+          value?.priority ??
+          recoveryPreferences.defaultTaskPriority,
+        )
 
         if (!value) return
         if (value.mode.type === "mask") {
@@ -218,7 +222,7 @@ export default function RecoveryPanel({
         setScheduledRecovery(null)
         setSchedulerSnapshot(null)
       })
-  }, [isRunning, task.id])
+  }, [isRunning, recoveryPreferences.defaultTaskPriority, task.id])
 
   // 构建字符集
   const buildCharset = useCallback(() => {

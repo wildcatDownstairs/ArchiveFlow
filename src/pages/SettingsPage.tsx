@@ -108,10 +108,10 @@ export default function SettingsPage() {
   }
 
   const handleNumericPreferenceChange = async (
-    key: "defaultMinLength" | "defaultMaxLength",
+    key: "defaultMinLength" | "defaultMaxLength" | "defaultTaskPriority",
     value: number,
   ) => {
-    const normalized = Math.max(1, value)
+    const normalized = key === "defaultTaskPriority" ? value : Math.max(1, value)
     if (recoveryPreferences[key] === normalized) return
 
     updateRecoveryPreferences({ [key]: normalized })
@@ -119,7 +119,11 @@ export default function SettingsPage() {
   }
 
   const handleBooleanPreferenceChange = async (
-    key: "autoIncludeFilenamePatterns" | "autoClearDictionaryInput",
+    key:
+      | "autoIncludeFilenamePatterns"
+      | "autoClearDictionaryInput"
+      | "exportMaskPasswords"
+      | "exportIncludeAuditEvents",
     value: boolean,
   ) => {
     if (recoveryPreferences[key] === value) return
@@ -280,6 +284,24 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          <div className="space-y-1">
+            <label className="text-sm font-medium">{t("default_task_priority")}</label>
+            <input
+              type="number"
+              value={recoveryPreferences.defaultTaskPriority}
+              min={-10}
+              max={10}
+              onChange={(e) =>
+                void handleNumericPreferenceChange(
+                  "defaultTaskPriority",
+                  parseInt(e.target.value, 10) || 0,
+                )
+              }
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <p className="text-xs text-muted-foreground">{t("default_task_priority_hint")}</p>
+          </div>
+
           <div className="space-y-2 text-sm">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -347,6 +369,38 @@ export default function SettingsPage() {
               }
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("export_defaults")}</p>
+            <label className="flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                checked={recoveryPreferences.exportMaskPasswords}
+                onChange={(e) =>
+                  void handleBooleanPreferenceChange(
+                    "exportMaskPasswords",
+                    e.target.checked,
+                  )
+                }
+                className="rounded border-gray-300"
+              />
+              {t("export_mask_passwords")}
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                checked={recoveryPreferences.exportIncludeAuditEvents}
+                onChange={(e) =>
+                  void handleBooleanPreferenceChange(
+                    "exportIncludeAuditEvents",
+                    e.target.checked,
+                  )
+                }
+                className="rounded border-gray-300"
+              />
+              {t("export_include_audit_events")}
+            </label>
           </div>
         </div>
       </section>

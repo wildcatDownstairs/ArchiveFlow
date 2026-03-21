@@ -16,9 +16,12 @@ export interface RecoveryPreferences {
   defaultCharsetFlags: CharsetFlags
   defaultMinLength: number
   defaultMaxLength: number
+  defaultTaskPriority: number
   autoIncludeFilenamePatterns: boolean
   autoClearDictionaryInput: boolean
   resultRetentionPolicy: ResultRetentionPolicy
+  exportMaskPasswords: boolean
+  exportIncludeAuditEvents: boolean
   maxConcurrentRecoveries: number
 }
 
@@ -31,9 +34,12 @@ const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
   },
   defaultMinLength: 1,
   defaultMaxLength: 4,
+  defaultTaskPriority: 0,
   autoIncludeFilenamePatterns: false,
   autoClearDictionaryInput: false,
   resultRetentionPolicy: "plaintext",
+  exportMaskPasswords: false,
+  exportIncludeAuditEvents: true,
   maxConcurrentRecoveries: 1,
 }
 

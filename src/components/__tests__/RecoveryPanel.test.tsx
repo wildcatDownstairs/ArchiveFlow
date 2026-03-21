@@ -65,9 +65,12 @@ describe("RecoveryPanel", () => {
         },
         defaultMinLength: 1,
         defaultMaxLength: 4,
+        defaultTaskPriority: 2,
         autoIncludeFilenamePatterns: false,
         autoClearDictionaryInput: false,
         resultRetentionPolicy: "plaintext",
+        exportMaskPasswords: false,
+        exportIncludeAuditEvents: true,
         maxConcurrentRecoveries: 1,
       },
     }))
