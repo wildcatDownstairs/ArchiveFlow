@@ -73,17 +73,15 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
     let auth_code = &payload[payload.len() - 10..];
     let encrypted_content = &payload[salt_len + 2..payload.len() - 10];
 
-    let mut data_field = Vec::with_capacity(password_verification.len() + encrypted_content.len());
-    data_field.extend_from_slice(password_verification);
-    data_field.extend_from_slice(encrypted_content);
-
     Ok(HashcatZipHash {
         hash_mode: 13600,
         hash_string: format!(
-            "$zip2$*0*{}*0*{}*{}*{}*$/zip2$",
+            "$zip2$*0*{}*0*{}*{}*{:x}*{}*{}*$/zip2$",
             aes_strength,
             hex_encode(salt),
-            hex_encode(&data_field),
+            hex_encode(password_verification),
+            encrypted_content.len(),
+            hex_encode(encrypted_content),
             hex_encode(auth_code)
         ),
     })
