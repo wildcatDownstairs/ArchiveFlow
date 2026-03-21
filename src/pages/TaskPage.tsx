@@ -7,7 +7,7 @@ import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/stores/appStore"
 import { useTaskStore } from "@/stores/taskStore"
-import { formatFileSize, formatDateTime } from "@/lib/format"
+import { formatFileSize, formatDateTime, buildExportFileName } from "@/lib/format"
 import { exportTasks } from "@/services/api"
 import type { Task, ExportFormat } from "@/types"
 
@@ -61,14 +61,7 @@ export default function TaskPage() {
   const exportButtonClassName =
     "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
 
-  const buildExportFileName = (format: ExportFormat) => {
-    const timestamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace("T", "-")
-      .slice(0, 15)
-    return `archiveflow-export-all-${timestamp}.${format}`
-  }
+
 
   const handleExportAll = async (format: ExportFormat) => {
     if (exportableTasks.length === 0) {

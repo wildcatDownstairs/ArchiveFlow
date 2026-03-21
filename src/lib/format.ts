@@ -26,3 +26,21 @@ export function formatElapsed(seconds: number): string {
   const sec = seconds % 60
   return `${min}m ${sec.toFixed(0)}s`
 }
+
+export function buildExportFileName(format: string, fileName?: string): string {
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace("T", "-")
+    .slice(0, 15)
+
+  if (fileName) {
+    const sanitizedName = fileName
+      .replace(/\.[^.]+$/, "")
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .trim()
+      .slice(0, 60) || "task"
+    return `archiveflow-${sanitizedName}-${timestamp}.${format}`
+  }
+  return `archiveflow-export-all-${timestamp}.${format}`
+}

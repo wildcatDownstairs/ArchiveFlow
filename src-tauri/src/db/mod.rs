@@ -324,6 +324,10 @@ impl Database {
     fn parse_recovery_checkpoint_row(row: &rusqlite::Row) -> rusqlite::Result<RecoveryCheckpoint> {
         // SQLite 里保存的是字符串和整数，这里把它们重新组装成业务结构体，
         // 这样上层代码就不需要关心底层表结构细节。
+        //
+        // 注意：列索引顺序必须与 SELECT 语句中的列顺序严格对应：
+        //   0: task_id, 1: mode_json, 2: archive_type, 3: priority,
+        //   4: tried, 5: total, 6: updated_at
         let mode_json: String = row.get(1)?;
         let archive_type_str: String = row.get(2)?;
         let priority: i64 = row.get(3)?;

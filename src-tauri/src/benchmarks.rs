@@ -12,7 +12,7 @@ use crate::db::Database;
 use crate::domain::recovery::{AttackMode, RecoveryCheckpoint, RecoveryProgress, RecoveryStatus};
 use crate::domain::task::ArchiveType;
 use crate::services::recovery_service::{
-    try_password_on_archive, BruteForceIterator, MaskIterator,
+    try_password_7z, try_password_on_archive, try_password_rar, BruteForceIterator, MaskIterator,
 };
 
 // BenchmarkSample 代表一条基准记录。
@@ -64,6 +64,20 @@ fn zip_fixture_path() -> PathBuf {
         .join("encrypted-aes.zip")
 }
 
+fn sevenz_fixture_path() -> PathBuf {
+    workspace_root()
+        .join("fixtures")
+        .join("7z")
+        .join("encrypted.7z")
+}
+
+fn rar_fixture_path() -> PathBuf {
+    workspace_root()
+        .join("fixtures")
+        .join("rar")
+        .join("encrypted.rar")
+}
+
 // 用一个通用 helper 包装“开始计时 -> 执行闭包 -> 结束计时”。
 // FnOnce 表示这个闭包最多被调用一次，适合 benchmark 场景。
 fn measure(
@@ -103,6 +117,15 @@ fn benchmark_mask_generation(limit: u64) -> BenchmarkSample {
     })
 }
 
+fn benchmark_bruteforce_resume_skip(offset: u64, take_count: u64) -> BenchmarkSample {
+    measure("bruteforce_resume_skip", take_count, "candidates", || {
+        let mut iter = BruteForceIterator::new("abcdefghijklmnopqrstuvwxyz0123456789", 6, 8);
+        iter.skip_to(offset);
+        let produced = iter.take(take_count as usize).count() as u64;
+        black_box(produced);
+    })
+}
+
 fn benchmark_zip_verification(iterations: u64) -> BenchmarkSample {
     measure("zip_wrong_password_check", iterations, "attempts", || {
         let path = zip_fixture_path();
@@ -120,6 +143,26 @@ fn benchmark_zip_verification(iterations: u64) -> BenchmarkSample {
         for _ in 0..iterations {
             let matched =
                 try_password_on_archive(&mut archive, encrypted_index, "definitely-wrong");
+            black_box(matched);
+        }
+    })
+}
+
+fn benchmark_sevenz_verification(iterations: u64) -> BenchmarkSample {
+    measure("7z_wrong_password_check", iterations, "attempts", || {
+        let path = sevenz_fixture_path();
+        for _ in 0..iterations {
+            let matched = try_password_7z(&path, "definitely-wrong");
+            black_box(matched);
+        }
+    })
+}
+
+fn benchmark_rar_verification(iterations: u64) -> BenchmarkSample {
+    measure("rar_wrong_password_check", iterations, "attempts", || {
+        let path = rar_fixture_path();
+        for _ in 0..iterations {
+            let matched = try_password_rar(&path, "definitely-wrong");
             black_box(matched);
         }
     })
@@ -176,7 +219,10 @@ fn run_baseline_benchmarks() -> Vec<BenchmarkSample> {
     vec![
         benchmark_bruteforce_generation(100_000),
         benchmark_mask_generation(100_000),
+        benchmark_bruteforce_resume_skip(10_000_000, 100_000),
         benchmark_zip_verification(1_000),
+        benchmark_sevenz_verification(500),
+        benchmark_rar_verification(500),
         benchmark_progress_serialization(10_000),
         benchmark_checkpoint_writes(2_000),
     ]
@@ -195,5 +241,5 @@ fn recovery_baseline_benchmarks_print_report() {
     }
     println!();
 
-    assert_eq!(samples.len(), 5);
+    assert_eq!(samples.len(), 8);
 }

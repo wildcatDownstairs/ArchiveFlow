@@ -4,21 +4,23 @@ import type {
   ScheduledRecovery,
   Task,
 } from "@/types"
+import type { TFunction } from "i18next"
 
 export function describeObservedMode(
   scheduledRecovery: ScheduledRecovery | null,
   checkpoint: RecoveryCheckpoint | null,
+  t: TFunction,
 ): string | null {
   const mode = scheduledRecovery?.mode ?? checkpoint?.mode
   if (!mode) return null
 
   switch (mode.type) {
     case "dictionary":
-      return `字典攻击 · ${mode.wordlist.length} 个候选`
+      return `${t("dictionary_attack")} · ${mode.wordlist.length}`
     case "brute_force":
-      return `暴力破解 · 字符集 ${mode.charset.length} · 长度 ${mode.min_length}-${mode.max_length}`
+      return `${t("bruteforce_attack")} · ${t("charset")} ${mode.charset.length} · ${mode.min_length}-${mode.max_length}`
     case "mask":
-      return `掩码攻击 · ${mode.mask}`
+      return `${t("mask_attack")} · ${mode.mask}`
     default:
       return null
   }

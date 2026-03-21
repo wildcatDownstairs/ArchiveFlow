@@ -130,8 +130,9 @@ fn status_label(status: &TaskStatus) -> &'static str {
     }
 }
 
-fn mask_password(password: &str) -> String {
-    "•".repeat(password.chars().count())
+fn mask_password(_password: &str) -> String {
+    // 使用固定长度掩码，避免泄露密码长度信息
+    "••••••••".to_string()
 }
 
 fn export_password(password: Option<&str>, options: &ExportOptions) -> Option<String> {
@@ -648,7 +649,7 @@ mod tests {
 
         let report = build_task_report(&task, &[], &options);
 
-        assert_eq!(report.found_password.as_deref(), Some("••••••"));
+        assert_eq!(report.found_password.as_deref(), Some("••••••••"));
         assert!(report.summary.contains("已导出脱敏密码"));
     }
 

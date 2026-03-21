@@ -1,5 +1,15 @@
-const COMMON_SUFFIXES = ["1", "12", "123", "1234", "2024", "2025", "2026", "!", "@123"]
-const YEAR_PATTERNS = ["2024", "2025", "2026", "24", "25", "26"]
+function buildYearValues(): string[] {
+  const currentYear = new Date().getFullYear()
+  const years: string[] = []
+  for (let offset = 0; offset <= 2; offset++) {
+    const year = currentYear - offset
+    years.push(String(year), String(year).slice(-2))
+  }
+  return years
+}
+
+const YEAR_PATTERNS = buildYearValues()
+const COMMON_SUFFIXES = ["1", "12", "123", "1234", ...YEAR_PATTERNS.filter((y) => y.length === 4), "!", "@123"]
 const COMBINATION_SEPARATORS = ["", "-", "_", "."]
 const MAX_GENERATED_CANDIDATES = 50_000
 
@@ -31,7 +41,7 @@ function leetspeakVariant(word: string): string {
 }
 
 function reverseWord(word: string): string {
-  return word.split("").reverse().join("")
+  return Array.from(word).reverse().join("")
 }
 
 function filenameSeeds(fileName: string): string[] {

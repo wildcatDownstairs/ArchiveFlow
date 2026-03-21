@@ -382,7 +382,7 @@ export default function RecoveryPanel({
   const showRunningProgress = isRunning && progress?.status === "running"
   const showCancelButton =
     isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
-  const observedModeDescription = describeObservedMode(scheduledRecovery, checkpoint)
+  const observedModeDescription = describeObservedMode(scheduledRecovery, checkpoint, t)
   const etaSeconds = estimateEtaSeconds(progress)
   const stageKey = getRecoveryStageKey(task, progress, scheduledRecovery)
   const lastCheckpointAt = progress?.last_checkpoint_at ?? checkpoint?.updated_at ?? null
@@ -827,16 +827,17 @@ export default function RecoveryPanel({
                     ["reverse", t("transform_reverse")],
                     ["duplicate", t("transform_duplicate")],
                     ["yearPatterns", t("transform_year_patterns")],
-                    ["separatorPatterns", t("transform_separator_patterns")],
+                    ["separatorPatterns", t("transform_separator_patterns"), !dictionaryOptions.combineWords] as const,
                     ["commonSuffixes", t("transform_common_suffixes")],
                     ["combineWords", t("combine_dictionary")],
                     ["includeFilenamePatterns", t("include_filename_patterns")],
                   ] as const
-                ).map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                ).map(([key, label, disabled]) => (
+                  <label key={key} className={cn("flex items-center gap-2", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}>
                     <input
                       type="checkbox"
                       checked={dictionaryOptions[key]}
+                      disabled={!!disabled}
                       onChange={(e) =>
                         setDictionaryOptions((prev) => ({
                           ...prev,

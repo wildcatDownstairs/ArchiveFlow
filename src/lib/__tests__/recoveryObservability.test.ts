@@ -5,6 +5,9 @@ import {
   getRecoveryStageKey,
 } from "@/lib/recoveryObservability"
 import type { RecoveryCheckpoint, RecoveryProgress, ScheduledRecovery, Task } from "@/types"
+import type { TFunction } from "i18next"
+
+const mockT: TFunction = ((key: string) => key) as unknown as TFunction
 
 const baseTask: Task = {
   id: "task-1",
@@ -32,7 +35,7 @@ describe("recoveryObservability", () => {
       updated_at: "2026-03-21T00:00:00Z",
     }
 
-    expect(describeObservedMode(null, checkpoint)).toBe("掩码攻击 · ?d?d?d?d")
+    expect(describeObservedMode(null, checkpoint, mockT)).toBe("mask_attack · ?d?d?d?d")
   })
 
   it("estimates eta only for running progress with positive speed", () => {
