@@ -267,7 +267,9 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_zip_aes_hash, extract_zip_pkzip_hash, parse_winzip_aes_extra};
+    use super::{
+        extract_zip_aes_hash, extract_zip_pkzip_hash, parse_winzip_aes_extra, HashcatZipHash,
+    };
     use crate::domain::recovery::AttackMode;
     use crate::services::hashcat_service::{build_attack_args, run_hashcat};
     use crate::services::recovery_service::RecoveryResult;
@@ -278,6 +280,48 @@ mod tests {
     fn zip_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         manifest_dir.parent().unwrap().join("fixtures").join("zip")
+    }
+
+    /// 复用一套“真机 hashcat”测试流程来验证 ZIP hash 提取结果。
+    /// 这样 AES / PKZIP 两条路径都能走完全链路：
+    ///   1. 提取 hashcat 兼容 hash
+    ///   2. 写临时 hash / wordlist 文件
+    ///   3. 调本机 hashcat 跑小字典
+    ///   4. 断言已知密码能被找到
+    fn crack_fixture_with_local_hashcat(hash: HashcatZipHash, session_name: &str) {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let hashcat_path = std::env::var("HASHCAT_PATH")
+            .expect("running ignored hashcat tests requires HASHCAT_PATH to be set");
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = build_attack_args(
+            &AttackMode::Dictionary {
+                wordlist: vec!["wrong".to_string(), "test123".to_string()],
+            },
+            hash.hash_mode,
+            &hash.hash_string,
+            session_name,
+            temp_dir.path(),
+        )
+        .unwrap();
+
+        let result = run_hashcat(
+            Path::new(&hashcat_path),
+            &args.args,
+            &args.outfile_path,
+            session_name,
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap();
+
+        match result {
+            RecoveryResult::Found(password) => assert_eq!(password, "test123"),
+            other => panic!("expected hashcat to find password, got {:?}", other),
+        }
     }
 
     #[test]
@@ -326,43 +370,19 @@ mod tests {
     #[test]
     #[ignore = "requires local hashcat binary"]
     fn hashcat_can_crack_extracted_zip_aes_fixture() {
-        if !cfg!(windows) {
-            return;
-        }
-
-        let hashcat_path = match std::env::var("HASHCAT_PATH") {
-            Ok(path) => path,
-            Err(_) => return,
-        };
-
         let zip_path = zip_fixtures_dir().join("encrypted-aes.zip");
         let hash = extract_zip_aes_hash(&zip_path).unwrap();
-        let temp_dir = tempfile::tempdir().unwrap();
-        let args = build_attack_args(
-            &AttackMode::Dictionary {
-                wordlist: vec!["wrong".to_string(), "test123".to_string()],
-            },
-            hash.hash_mode,
-            &hash.hash_string,
-            "zip_aes_fixture",
-            temp_dir.path(),
-        )
-        .unwrap();
+        crack_fixture_with_local_hashcat(hash, "zip_aes_fixture");
+    }
 
-        let result = run_hashcat(
-            Path::new(&hashcat_path),
-            &args.args,
-            &args.outfile_path,
-            "zip-aes-fixture",
-            Arc::new(AtomicBool::new(false)),
-            |_| {},
-        )
-        .unwrap();
-
-        match result {
-            RecoveryResult::Found(password) => assert_eq!(password, "test123"),
-            other => panic!("expected hashcat to find password, got {:?}", other),
-        }
+    /// 对称地覆盖 PKZIP GPU 路径。
+    /// 这能防止以后 refactor 只保证单元测试通过，却把 17200 的真实格式改坏。
+    #[test]
+    #[ignore = "requires local hashcat binary"]
+    fn hashcat_can_crack_extracted_zip_pkzip_fixture() {
+        let zip_path = zip_fixtures_dir().join("encrypted-pkzip.zip");
+        let hash = extract_zip_pkzip_hash(&zip_path).unwrap();
+        crack_fixture_with_local_hashcat(hash, "zip_pkzip_fixture");
     }
 
     #[test]
