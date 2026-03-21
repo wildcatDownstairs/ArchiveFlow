@@ -407,18 +407,11 @@ const handleExport = async (format: ExportFormat) => {
         </div>
       )}
 
-      {/* 主体内容：双列布局 */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      {/* 主体内容：主区 + 右侧边栏 */}
+      <div className="flex flex-col xl:flex-row gap-6 items-start">
         {/* 左侧：文件树 */}
         {info && info.entries.length > 0 && (
-          <div
-            className={cn(
-              "flex flex-col gap-6",
-              (task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted
-                ? "xl:col-span-5"
-                : "xl:col-span-12"
-            )}
-          >
+          <div className="flex flex-col gap-6 flex-1 min-w-0">
             <section className="space-y-3">
               <button 
                 onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
@@ -445,7 +438,7 @@ const handleExport = async (format: ExportFormat) => {
 
         {/* 右侧：密码恢复面板 - 仅在有加密文件时显示 */}
         {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
-          <div className="xl:col-span-7 flex flex-col gap-6">
+          <div className="flex flex-col gap-6 flex-1 min-w-0">
             <RecoveryPanel
               task={task}
               onTaskStatusChange={handleRecoveryStatusChange}
