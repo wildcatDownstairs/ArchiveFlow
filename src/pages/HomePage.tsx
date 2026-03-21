@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Upload, FileArchive, Lock, Unlock } from "lucide-react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { stat } from "@tauri-apps/plugin-fs"
+import { listen } from "@tauri-apps/api/event"
 import { cn } from "@/lib/utils"
 import { useTaskStore } from "@/stores/taskStore"
 import { formatDateTime, formatFileSize, getFileNameFromPath } from "@/lib/format"
@@ -72,41 +73,34 @@ export default function HomePage() {
     return ALLOWED_EXTENSIONS.includes(ext)
   }
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.stopPropagation()
+  // Tauri v2 intercepts OS-level drag-drop before DOM events reach the WebView.
+  // We must use Tauri's native drag-drop events instead of React's onDrop/onDragOver.
+  useEffect(() => {
+    const unlistenDrop = listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
       setDragging(false)
-
-      const files = e.dataTransfer.files
-      if (files.length > 0) {
-        const file = files[0]
-        const filePath = (file as File & { path?: string }).path
-        if (filePath && isAllowedFile(filePath)) {
+      const paths = event.payload.paths
+      if (paths.length > 0) {
+        const filePath = paths[0]
+        if (isAllowedFile(filePath)) {
           void handleImport(filePath)
         }
       }
-    },
-    [handleImport],
-  )
+    })
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.stopPropagation()
+    const unlistenOver = listen("tauri://drag-over", () => {
       setDragging(true)
-    },
-    [],
-  )
+    })
 
-  const handleDragLeave = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.stopPropagation()
+    const unlistenLeave = listen("tauri://drag-leave", () => {
       setDragging(false)
-    },
-    [],
-  )
+    })
+
+    return () => {
+      void unlistenDrop.then((f) => f())
+      void unlistenOver.then((f) => f())
+      void unlistenLeave.then((f) => f())
+    }
+  }, [handleImport])
 
   const handleClick = useCallback(async () => {
     try {
@@ -130,9 +124,6 @@ export default function HomePage() {
 
       {/* Drop zone */}
       <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
         onClick={() => void handleClick()}
         className={cn(
           "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-12 text-center transition-colors cursor-pointer",
