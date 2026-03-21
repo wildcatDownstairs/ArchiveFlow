@@ -405,20 +405,20 @@ const handleExport = async (format: ExportFormat) => {
       )}
 
       {/* 主体内容：双列布局 */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* 左侧：文件树 */}
         {info && info.entries.length > 0 && (
           <div
             className={cn(
               "flex flex-col gap-6",
               (task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted
-                ? "lg:col-span-5 xl:col-span-4"
-                : "lg:col-span-12"
+                ? "xl:col-span-5"
+                : "xl:col-span-12"
             )}
           >
             <section className="space-y-3">
               <h2 className="text-lg font-semibold">{t("archive_contents")}</h2>
-              <div className="max-h-[calc(100vh-24rem)] min-h-[20rem] rounded-lg border bg-card p-4 overflow-y-auto">
+              <div className="max-h-[calc(100vh-24rem)] min-h-[30rem] rounded-lg border bg-card p-4 overflow-y-auto">
                 {fileTree.map((node) => (
                   <FileTreeNode key={node.path} node={node} t={t} />
                 ))}
@@ -429,7 +429,7 @@ const handleExport = async (format: ExportFormat) => {
 
         {/* 右侧：密码恢复面板 - 仅在有加密文件时显示 */}
         {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
-          <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
+          <div className="xl:col-span-7 flex flex-col gap-6">
             <RecoveryPanel
               task={task}
               onTaskStatusChange={handleRecoveryStatusChange}

@@ -676,8 +676,8 @@ const handleCopy = async (password: string) => {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-        <div className="rounded-lg border p-4 md:p-5 bg-card shadow-sm flex flex-col justify-center space-y-4">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="rounded-lg border p-4 md:p-5 bg-card shadow-sm flex flex-col space-y-4">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-primary" />
@@ -685,7 +685,7 @@ const handleCopy = async (password: string) => {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-row md:flex-wrap md:items-center md:justify-between gap-6">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <div className="text-xs text-muted-foreground font-medium">{t("current_stage")}</div>
               <div className="text-sm font-semibold">{t(stageKey)}</div>
@@ -700,9 +700,9 @@ const handleCopy = async (password: string) => {
               </div>
             </div>
             
-            <div className="space-y-1.5 flex-1 min-w-[140px]">
+            <div className="space-y-1.5">
               <div className="text-xs text-muted-foreground font-medium">{t("current_parameters")}</div>
-              <div className="text-sm font-semibold break-words truncate">
+              <div className="text-sm font-semibold break-words">
                 {observedModeDescription ?? t("not_available")}
               </div>
             </div>
@@ -714,7 +714,7 @@ const handleCopy = async (password: string) => {
               </div>
             </div>
             
-            <div className="space-y-1.5 hidden lg:block">
+            <div className="space-y-1.5 col-span-2">
               <div className="text-xs text-muted-foreground font-medium">{t("last_checkpoint")}</div>
               <div className="text-sm font-semibold text-muted-foreground">
                 {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : t("not_available")}
@@ -723,7 +723,7 @@ const handleCopy = async (password: string) => {
           </div>
         </div>
 
-        <div className="rounded-lg border p-4 space-y-3">
+        <div className="rounded-lg border p-4 space-y-3 bg-card shadow-sm flex flex-col">
           <div className="text-sm font-medium">{t("recent_audit_events")}</div>
           {recentAuditEvents.length === 0 ? (
             <div className="text-sm text-muted-foreground">{t("no_recent_audit_events")}</div>
