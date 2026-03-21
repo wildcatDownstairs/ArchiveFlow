@@ -387,8 +387,8 @@ impl RecoveryScheduler {
         let waited = now.signed_duration_since(task.requested_at);
         let waited_seconds = waited.num_seconds().max(0);
         let aging_step_seconds = Self::PRIORITY_AGING_INTERVAL.num_seconds().max(1);
-        let aging_bonus = (waited_seconds / aging_step_seconds)
-            .min(Self::MAX_PRIORITY_AGING_BONUS as i64) as i32;
+        let aging_bonus =
+            (waited_seconds / aging_step_seconds).min(Self::MAX_PRIORITY_AGING_BONUS as i64) as i32;
 
         task.priority.saturating_add(aging_bonus)
     }
@@ -620,11 +620,9 @@ mod tests {
             mask: "?d".to_string(),
         };
 
-        assert!(
-            scheduler
-                .enqueue("task-1", mode.clone(), 0, RecoveryBackend::Cpu, None)
-                .is_ok()
-        );
+        assert!(scheduler
+            .enqueue("task-1", mode.clone(), 0, RecoveryBackend::Cpu, None)
+            .is_ok());
         assert_eq!(
             scheduler.enqueue("task-1", mode, 1, RecoveryBackend::Cpu, None),
             Err(SchedulerError::AlreadyScheduled)

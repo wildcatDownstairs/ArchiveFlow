@@ -420,9 +420,7 @@ pub async fn start_recovery(
         }
 
         let hashcat_info = hashcat_service::detect_hashcat(
-            normalized_hashcat_path
-                .as_deref()
-                .map(std::path::Path::new),
+            normalized_hashcat_path.as_deref().map(std::path::Path::new),
         )
         .map_err(AppError::InvalidArgument)?;
         if !hashcat_info.has_usable_gpu() {
@@ -740,7 +738,9 @@ pub async fn pause_recovery(
 }
 
 #[command]
-pub async fn detect_hashcat(custom_path: Option<String>) -> Result<HashcatDetectionResult, AppError> {
+pub async fn detect_hashcat(
+    custom_path: Option<String>,
+) -> Result<HashcatDetectionResult, AppError> {
     let normalized = custom_path
         .as_deref()
         .map(str::trim)
