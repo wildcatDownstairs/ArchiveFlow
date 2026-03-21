@@ -10,7 +10,37 @@ pub struct HashcatZipHash {
 }
 
 pub fn extract_zip_hash(file_path: &Path) -> Result<HashcatZipHash, String> {
-    extract_zip_aes_hash(file_path)
+    // Probe to decide which path to take: AES or PKZIP
+    let file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("解析 ZIP 文件失败: {}", e))?;
+
+    let target_index = (0..archive.len())
+        .find(|index| {
+            archive
+                .by_index_raw(*index)
+                .map(|entry| entry.encrypted() && entry.is_file())
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| "ZIP 中没有可用于 GPU 的加密文件条目".to_string())?;
+
+    let entry = archive
+        .by_index_raw(target_index)
+        .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+
+    let is_aes = entry
+        .extra_data()
+        .map(|extra| find_winzip_aes_field(extra).is_some())
+        .unwrap_or(false);
+
+    drop(entry);
+    drop(archive);
+
+    if is_aes {
+        extract_zip_aes_hash(file_path)
+    } else {
+        extract_zip_pkzip_hash(file_path)
+    }
 }
 
 pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> {
@@ -90,6 +120,119 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
     })
 }
 
+/// 从传统 PKZIP 加密 ZIP 中提取 hashcat mode 17200 ($pkzip2$) hash。
+///
+/// $pkzip2$ 格式 (single-file compressed):
+///   $pkzip2$<N>*<chk>*<ctype>*<plain>*<clen>*<ulen>*<crc32>*<offset>*<addoff>*<method>*<dlen>*<crc16>*<crc_hi>*<data>*$/pkzip2$
+///
+/// 字段说明：
+///   N       = 1 (单文件攻击)
+///   chk     = 1 (使用 2 字节校验)
+///   ctype   = 2 (压缩) 或 0 (存储)
+///   plain   = 0
+///   clen    = compressed_size (含 12 字节加密头) 的十六进制
+///   ulen    = uncompressed_size 的十六进制
+///   crc32   = 原始文件 CRC32，8 位小写十六进制
+///   offset  = 0
+///   addoff  = data 长度 (= clen)
+///   method  = 压缩方法 (8=Deflate, 0=Store)
+///   dlen    = data 长度十六进制 (= clen)
+///   crc16   = crc32 & 0xffff，4 位小写十六进制
+///   crc_hi  = (crc32 >> 16) & 0xffff，4 位小写十六进制
+///   data    = 完整加密负载（12 字节加密头 + 密文体）的十六进制
+pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String> {
+    let file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("解析 ZIP 文件失败: {}", e))?;
+
+    // Find the first encrypted file entry
+    let target_index = (0..archive.len())
+        .find(|index| {
+            archive
+                .by_index_raw(*index)
+                .map(|entry| entry.encrypted() && entry.is_file())
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| "ZIP 中没有加密文件条目".to_string())?;
+
+    let entry = archive
+        .by_index_raw(target_index)
+        .map_err(|e| format!("读取 ZIP 条目失败: {}", e))?;
+
+    // Reject AES-encrypted entries
+    if let Some(extra) = entry.extra_data() {
+        if find_winzip_aes_field(extra).is_some() {
+            return Err("当前条目使用 WinZip AES 加密，不是 PKZIP 传统加密".to_string());
+        }
+    }
+
+    if !entry.encrypted() {
+        return Err("ZIP 条目未加密".to_string());
+    }
+
+    let compressed_size = entry.compressed_size();
+    let uncompressed_size = entry.size();
+    let crc32 = entry.crc32();
+    let compress_method: u16 = match entry.compression() {
+        zip::CompressionMethod::Stored => 0,
+        zip::CompressionMethod::Deflated => 8,
+        other => {
+            #[allow(deprecated)]
+            let v = other.to_u16();
+            v
+        }
+    };
+    let data_start = entry.data_start();
+
+    drop(entry);
+    drop(archive);
+
+    // Read the full encrypted payload (12-byte PKZIP encryption header + ciphertext)
+    let mut file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
+    file.seek(SeekFrom::Start(data_start))
+        .map_err(|e| format!("定位 ZIP 数据段失败: {}", e))?;
+
+    let mut encrypted_data = vec![0_u8; compressed_size as usize];
+    file.read_exact(&mut encrypted_data)
+        .map_err(|e| format!("读取 ZIP 加密数据失败: {}", e))?;
+
+    if encrypted_data.len() < 12 {
+        return Err("PKZIP 加密数据段过短（至少需要 12 字节加密头）".to_string());
+    }
+
+    // Compression type flag: 2 = compressed, 0 = stored
+    let ctype_flag: u32 = if compress_method == 0 { 0 } else { 2 };
+    let method = compress_method as u32;
+
+    let clen_hex = format!("{:x}", compressed_size);
+    let ulen_hex = format!("{:x}", uncompressed_size);
+    let crc32_hex = format!("{:08x}", crc32);
+    let dlen_hex = clen_hex.clone();
+    let addoff_hex = clen_hex.clone();
+    let crc16_hex = format!("{:04x}", crc32 & 0xffff);
+    let crc_hi_hex = format!("{:04x}", (crc32 >> 16) & 0xffff);
+    let data_hex = hex_encode(&encrypted_data);
+
+    let hash_string = format!(
+        "$pkzip2$1*1*{ctype}*0*{clen}*{ulen}*{crc32}*0*{addoff}*{method}*{dlen}*{crc16}*{crc_hi}*{data}*$/pkzip2$",
+        ctype = ctype_flag,
+        clen = clen_hex,
+        ulen = ulen_hex,
+        crc32 = crc32_hex,
+        addoff = addoff_hex,
+        method = method,
+        dlen = dlen_hex,
+        crc16 = crc16_hex,
+        crc_hi = crc_hi_hex,
+        data = data_hex,
+    );
+
+    Ok(HashcatZipHash {
+        hash_mode: 17200,
+        hash_string,
+    })
+}
+
 fn find_winzip_aes_field(extra_data: &[u8]) -> Option<&[u8]> {
     let mut cursor = 0;
     while cursor + 4 <= extra_data.len() {
@@ -127,7 +270,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_zip_aes_hash, parse_winzip_aes_extra};
+    use super::{extract_zip_aes_hash, extract_zip_pkzip_hash, parse_winzip_aes_extra};
     use crate::domain::recovery::AttackMode;
     use crate::services::hashcat_service::{build_attack_args, run_hashcat};
     use crate::services::recovery_service::RecoveryResult;
@@ -223,5 +366,88 @@ mod tests {
             RecoveryResult::Found(password) => assert_eq!(password, "test123"),
             other => panic!("expected hashcat to find password, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_returns_mode_17200_for_pkzip_fixture() {
+        let path = zip_fixtures_dir().join("encrypted-pkzip.zip");
+        let hash = extract_zip_pkzip_hash(&path).unwrap();
+        assert_eq!(hash.hash_mode, 17200);
+        assert!(
+            hash.hash_string.starts_with("$pkzip2$"),
+            "hash_string should start with $pkzip2$, got: {}",
+            hash.hash_string
+        );
+        assert!(
+            hash.hash_string.ends_with("*$/pkzip2$"),
+            "hash_string should end with *$/pkzip2$, got: {}",
+            hash.hash_string
+        );
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_contains_correct_fields_for_fixture() {
+        // Fixture: encrypted-pkzip.zip
+        //   password: test123, compress_type=8 (Deflate)
+        //   CRC32: 0x0d4a1185, compressed_size: 25 (0x19), file_size: 11 (0xb)
+        //   encrypted_data (25 bytes):
+        //     b5d620e049737fec611672600821d36a99e568c4730a174434
+        let path = zip_fixtures_dir().join("encrypted-pkzip.zip");
+        let hash = extract_zip_pkzip_hash(&path).unwrap();
+        let s = &hash.hash_string;
+
+        // Must encode the full encrypted payload (25 bytes)
+        let expected_data_hex = "b5d620e049737fec611672600821d36a99e568c4730a174434";
+        assert!(
+            s.contains(expected_data_hex),
+            "hash must contain encrypted payload hex, got: {}",
+            s
+        );
+
+        // Must contain compressed_size in hex: 19
+        assert!(
+            s.contains("*19*"),
+            "hash must contain comp_len=19, got: {}",
+            s
+        );
+
+        // Must contain crc32: 0d4a1185
+        assert!(
+            s.contains("0d4a1185"),
+            "hash must contain crc32=0d4a1185, got: {}",
+            s
+        );
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_rejects_unencrypted_zip() {
+        let path = zip_fixtures_dir().join("normal.zip");
+        assert!(extract_zip_pkzip_hash(&path).is_err());
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_rejects_aes_zip() {
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
+        let result = extract_zip_pkzip_hash(&path);
+        assert!(
+            result.is_err(),
+            "AES zip should be rejected by PKZIP extractor"
+        );
+    }
+
+    #[test]
+    fn extract_zip_hash_dispatches_to_pkzip_for_pkzip_fixture() {
+        use super::extract_zip_hash;
+        let path = zip_fixtures_dir().join("encrypted-pkzip.zip");
+        let hash = extract_zip_hash(&path).unwrap();
+        assert_eq!(hash.hash_mode, 17200);
+    }
+
+    #[test]
+    fn extract_zip_hash_dispatches_to_aes_for_aes_fixture() {
+        use super::extract_zip_hash;
+        let path = zip_fixtures_dir().join("encrypted-aes.zip");
+        let hash = extract_zip_hash(&path).unwrap();
+        assert_eq!(hash.hash_mode, 13600);
     }
 }
