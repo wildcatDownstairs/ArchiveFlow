@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::domain::task::ArchiveType;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 /// 攻击模式：定义密码恢复时使用哪种搜索策略
 ///
@@ -182,6 +182,16 @@ pub struct RecoveryScheduler {
 }
 
 impl RecoveryScheduler {
+    /// 排队任务的“老化”步长。
+    ///
+    /// 对新手来说，可以把老化理解成：
+    ///   - 任务在队列里每多等一段时间
+    ///   - 调度器就额外给它加一点“虚拟优先级”
+    /// 这样能减少低优先级任务一直抢不到执行机会的情况。
+    const PRIORITY_AGING_INTERVAL: Duration = Duration::minutes(5);
+    /// 老化奖励上限，避免排太久的任务把原始优先级体系完全冲掉。
+    const MAX_PRIORITY_AGING_BONUS: i32 = 20;
+
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(RecoverySchedulerInner {
@@ -279,10 +289,11 @@ impl RecoveryScheduler {
             .filter(|task| task.state == ScheduledRecoveryState::Queued)
             .cloned()
             .collect();
+        let now = Utc::now();
         queued_tasks.sort_by(|left, right| {
-            right
-                .priority
-                .cmp(&left.priority)
+            Self::effective_queue_priority(right, now)
+                .cmp(&Self::effective_queue_priority(left, now))
+                .then_with(|| right.priority.cmp(&left.priority))
                 .then_with(|| left.requested_at.cmp(&right.requested_at))
         });
         queued_tasks.truncate(available_slots);
@@ -303,9 +314,14 @@ impl RecoveryScheduler {
 
     fn snapshot_locked(inner: &RecoverySchedulerInner) -> RecoverySchedulerSnapshot {
         let mut tasks: Vec<ScheduledRecovery> = inner.tasks.values().cloned().collect();
+        let now = Utc::now();
         tasks.sort_by(|left, right| {
             Self::state_rank(&left.state)
                 .cmp(&Self::state_rank(&right.state))
+                .then_with(|| {
+                    Self::effective_queue_priority(right, now)
+                        .cmp(&Self::effective_queue_priority(left, now))
+                })
                 .then_with(|| right.priority.cmp(&left.priority))
                 .then_with(|| left.requested_at.cmp(&right.requested_at))
         });
@@ -334,6 +350,25 @@ impl RecoveryScheduler {
             ScheduledRecoveryState::Queued => 1,
             ScheduledRecoveryState::Paused => 2,
         }
+    }
+
+    /// 计算队列排序时使用的“有效优先级”。
+    ///
+    /// 原始 priority 仍然是用户显式设置的权重；
+    /// effective priority 只在调度器内部排序时使用，不会写回数据库。
+    /// 这样既能保留用户意图，也能避免低优先级任务长期饥饿。
+    fn effective_queue_priority(task: &ScheduledRecovery, now: DateTime<Utc>) -> i32 {
+        if task.state != ScheduledRecoveryState::Queued {
+            return task.priority;
+        }
+
+        let waited = now.signed_duration_since(task.requested_at);
+        let waited_seconds = waited.num_seconds().max(0);
+        let aging_step_seconds = Self::PRIORITY_AGING_INTERVAL.num_seconds().max(1);
+        let aging_bonus = (waited_seconds / aging_step_seconds)
+            .min(Self::MAX_PRIORITY_AGING_BONUS as i64) as i32;
+
+        task.priority.saturating_add(aging_bonus)
     }
 }
 
@@ -431,6 +466,7 @@ mod tests {
     use super::{
         AttackMode, RecoveryManager, RecoveryScheduler, ScheduledRecoveryState, SchedulerError,
     };
+    use chrono::{Duration, Utc};
 
     #[test]
     fn try_register_is_atomic_per_task() {
@@ -567,5 +603,45 @@ mod tests {
         let scheduler = RecoveryScheduler::new();
         let snapshot = scheduler.set_max_concurrent(0);
         assert_eq!(snapshot.max_concurrent, 1);
+    }
+
+    #[test]
+    fn scheduler_aging_can_prevent_queue_starvation() {
+        let scheduler = RecoveryScheduler::new();
+        let mode = AttackMode::Mask {
+            mask: "?d?d".to_string(),
+        };
+        scheduler.enqueue("task-old-low", mode.clone(), 1).unwrap();
+        scheduler.enqueue("task-new-high", mode, 3).unwrap();
+
+        {
+            let mut inner = scheduler.inner.lock().unwrap();
+            let old_task = inner.tasks.get_mut("task-old-low").unwrap();
+            old_task.requested_at = Utc::now() - Duration::minutes(15);
+        }
+
+        let dispatched = scheduler.take_dispatchable_tasks();
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0].task_id, "task-old-low");
+    }
+
+    #[test]
+    fn scheduler_snapshot_orders_queued_tasks_by_effective_priority() {
+        let scheduler = RecoveryScheduler::new();
+        let mode = AttackMode::Dictionary {
+            wordlist: vec!["secret".to_string()],
+        };
+        scheduler.enqueue("task-low", mode.clone(), 0).unwrap();
+        scheduler.enqueue("task-high", mode, 1).unwrap();
+
+        {
+            let mut inner = scheduler.inner.lock().unwrap();
+            let old_low = inner.tasks.get_mut("task-low").unwrap();
+            old_low.requested_at = Utc::now() - Duration::minutes(10);
+        }
+
+        let snapshot = scheduler.snapshot();
+        assert_eq!(snapshot.tasks[0].task_id, "task-low");
+        assert_eq!(snapshot.tasks[1].task_id, "task-high");
     }
 }
