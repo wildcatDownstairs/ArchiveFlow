@@ -73,8 +73,8 @@ export default function MainLayout() {
   }
 
   return (
-    <div className="min-h-screen lg:flex">
-      <aside className="af-sidebar-shell border-b backdrop-blur lg:sticky lg:top-0 lg:h-screen lg:w-[224px] lg:flex-shrink-0 lg:border-b-0 lg:border-r">
+    <div className="flex h-screen min-h-screen flex-col overflow-hidden lg:flex-row">
+      <aside className="af-sidebar-shell shrink-0 border-b backdrop-blur lg:sticky lg:top-0 lg:h-screen lg:w-[224px] lg:flex-shrink-0 lg:border-b-0 lg:border-r">
         <div className="flex h-full flex-col px-4 py-6">
           <div className="flex items-center justify-between lg:block">
             <div className="af-sidebar-brand px-2 text-[18px] font-bold text-foreground">
@@ -208,7 +208,7 @@ export default function MainLayout() {
         </div>
       </aside>
 
-      <main className="af-main-shell min-w-0 flex-1">
+      <main className="af-main-shell min-h-0 min-w-0 flex-1">
         <Outlet />
       </main>
     </div>

@@ -2,12 +2,13 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-/// GPU hash 提取允许的最大压缩数据大小（字节）。
-/// AES (mode 13600) 和 PKZIP (mode 17200) 都需要把完整加密负载嵌入 hash 字符串：
-///   - PKZIP: CRC32 校验必须解密全部密文
-///   - AES:   HMAC-SHA1 认证码覆盖整段密文，hashcat 需要重新计算
-/// 超过此阈值时引导用户使用 CPU 引擎（CPU 引擎逐块流式解密，不受内存限制）。
-const MAX_PKZIP_DATA_SIZE: u64 = 10 * 1024 * 1024;
+/// hashcat mode 13600 的 `data` 字段（仅密文体，不含 salt/verify/auth）的最大长度。
+/// 对应 hashcat `module_13600.c` 里的 `data_buf[0x200000]`，即 8 MiB。
+const MAX_ZIP_AES_CONTENT_SIZE: u64 = 8 * 1024 * 1024;
+
+/// hashcat mode 17200 / 17210 的 `compressed_length` / `data_length` 最大长度。
+/// 对应 hashcat `module_17200.c` / `module_17210.c` 里的 `MAX_DATA (320 * 1024)`。
+const MAX_PKZIP_DATA_SIZE: u64 = 320 * 1024;
 
 /// 交给 hashcat 的 ZIP hash 信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,16 +84,6 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
         return Err("当前 ZIP 使用传统 PKZIP 加密，不是 WinZip AES 加密".to_string());
     }
 
-    // 大文件保护：mode 13600 ($zip2$) 验证时需要用完整加密负载重新计算
-    // HMAC-SHA1 认证码（auth code 覆盖整段密文，而非单独存储的摘要），
-    // 因此无法只读头尾跳过内容。对超大文件引导用户改用 CPU 引擎。
-    if compressed_size > MAX_PKZIP_DATA_SIZE {
-        return Err(format!(
-            "AES 加密条目过大（{:.1} MB），GPU 模式不支持（验证需嵌入完整密文）。请改用 CPU 引擎进行恢复",
-            compressed_size as f64 / (1024.0 * 1024.0)
-        ));
-    }
-
     let (aes_strength, _) = parse_winzip_aes_extra(&extra_data)?;
     let salt_len = match aes_strength {
         1 => 8,
@@ -102,6 +93,18 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
             return Err(format!("不支持的 ZIP AES 强度: {}", other));
         }
     };
+
+    let aes_overhead = salt_len as u64 + 2 + 10;
+
+    // 大文件保护：mode 13600 ($zip2$) 需要把完整密文体嵌入 hash 字符串。
+    // hashcat 自身对这段 `data` 有 8 MiB 的硬上限，超出时会直接拒收 hash。
+    if compressed_size > MAX_ZIP_AES_CONTENT_SIZE + aes_overhead {
+        let encrypted_content_size = compressed_size.saturating_sub(aes_overhead);
+        return Err(format!(
+            "AES 加密条目过大（密文 {:.1} MB），GPU 模式不支持（hashcat 最多接受 8.0 MB 密文）。请改用 CPU 引擎进行恢复",
+            encrypted_content_size as f64 / (1024.0 * 1024.0)
+        ));
+    }
 
     let mut file =
         File::open(file_path).map_err(|error| format!("打开 ZIP 文件失败: {}", error))?;
@@ -147,7 +150,7 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
 /// 字段说明：
 ///   N       = 1 (单文件攻击)
 ///   chk     = 1 (使用 2 字节校验)
-///   ctype   = 2 (压缩) 或 0 (存储)
+///   ctype   = 2 (data_type_enum, 始终为 2 以包含扩展字段)
 ///   plain   = 0
 ///   clen    = compressed_size (含 12 字节加密头) 的十六进制
 ///   ulen    = uncompressed_size 的十六进制
@@ -198,7 +201,10 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
         other => {
             #[allow(deprecated)]
             let v = other.to_u16();
-            v
+            return Err(format!(
+                "当前 ZIP 压缩方法 {} 不受 hashcat GPU 模式支持，请改用 CPU 引擎进行恢复",
+                v
+            ));
         }
     };
     let data_start = entry.data_start();
@@ -206,16 +212,14 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     drop(entry);
     drop(archive);
 
-    // 大文件保护：PKZIP mode 17200 必须把完整加密数据嵌入 hash 字符串，
-    // 因为 CRC32 校验需要解密全部密文——没有像 AES HMAC 那样独立存放于末尾
-    // 的认证标签，无法只读头尾跳过内容。对于超大文件（如 100MB+）会产生数百
-    // MB 的 hash 并耗尽内存。hashcat mode 17230（Checksum-Only）可绕过此限制，
-    // 但要求 >= 3 个加密条目，单文件 ZIP 无法使用。此处直接拒绝，引导用户
-    // 改用 CPU 引擎（CPU 引擎逐块解密，不需要把全部数据加载到内存中）。
+    // 大文件保护：PKZIP mode 17200 / 17210 必须把完整加密数据嵌入 hash 字符串，
+    // 而 hashcat 自身对这段数据有 320 KiB 的硬上限。超过后不会开始跑密码，
+    // 而是直接报 `Token length exception / No hashes loaded`。此处提前拦截并
+    // 引导用户改用 CPU 引擎。
     if compressed_size > MAX_PKZIP_DATA_SIZE {
         return Err(format!(
-            "PKZIP 加密条目过大（{:.1} MB），GPU 模式不支持（需嵌入完整密文）。请改用 CPU 引擎进行恢复",
-            compressed_size as f64 / (1024.0 * 1024.0)
+            "PKZIP 加密条目过大（{:.1} KB），GPU 模式不支持（hashcat 最多接受 320 KB 压缩数据）。请改用 CPU 引擎进行恢复",
+            compressed_size as f64 / 1024.0
         ));
     }
 
@@ -232,8 +236,12 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
         return Err("PKZIP 加密数据段过短（至少需要 12 字节加密头）".to_string());
     }
 
-    // Compression type flag: 2 = compressed, 0 = stored
-    let ctype_flag: u32 = if compress_method == 0 { 0 } else { 2 };
+    // data_type_enum: always 2 to include extended fields (clen/ulen/crc32/offset/addoff).
+    // The actual compression method (0=Stored, 8=Deflate) goes in the `method` field.
+    // Setting this to 0 for Stored entries was the root cause of "No hashes loaded" —
+    // hashcat's parser skips the 5 extended fields when data_type_enum <= 1,
+    // causing field misalignment and hash rejection.
+    let ctype_flag: u32 = 2;
     let method = compress_method as u32;
 
     // 根据压缩方式选择 hashcat mode：
@@ -518,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_zip_pkzip_hash_stored_fixture_has_ctype_0() {
+    fn extract_zip_pkzip_hash_stored_fixture_has_ctype_2() {
         // Fixture: encrypted-pkzip-stored.zip
         //   password: test123, compress_type=0 (Stored), CRC32: 0x0d4a1185
         //   compressed_size: 23 (= 11 content + 12 PKZIP header)
@@ -526,11 +534,13 @@ mod tests {
         let hash = extract_zip_pkzip_hash(&path).unwrap();
         let s = &hash.hash_string;
 
-        // ctype field should be 0 (stored), not 2 (compressed)
+        // data_type_enum must always be 2 to include extended fields
+        // (clen/ulen/crc32/offset/addoff). The actual compression method
+        // (0=Stored) goes in the later `method` field.
         // Format: $pkzip2$1*1*{ctype}*0*...
         assert!(
-            s.starts_with("$pkzip2$1*1*0*"),
-            "Stored entry should have ctype=0 in hash, got: {}",
+            s.starts_with("$pkzip2$1*1*2*"),
+            "Stored entry should have data_type_enum=2 in hash, got: {}",
             s
         );
 
@@ -601,6 +611,6 @@ mod tests {
             }
         }
         // 无大文件时，至少验证阈值常量合理
-        assert_eq!(MAX_PKZIP_DATA_SIZE, 10 * 1024 * 1024);
+        assert_eq!(MAX_PKZIP_DATA_SIZE, 320 * 1024);
     }
 }

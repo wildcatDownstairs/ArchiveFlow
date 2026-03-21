@@ -15,7 +15,7 @@ const resources = {
       app_name: "ArchiveFlow",
       home: "首页",
       tasks: "任务管理",
-      reports: "审计报告",
+      reports: "操作记录",
       settings: "设置",
       theme_dark: "深色主题",
       theme_light: "浅色主题",

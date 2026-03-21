@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import {
@@ -14,6 +14,7 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
+  Play,
 } from "lucide-react"
 import { save, ask } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
@@ -29,6 +30,7 @@ import {
 } from "@/lib/ui"
 import { exportTasks, getTaskAuditEvents } from "@/services/api"
 import RecoveryPanel from "@/components/RecoveryPanel"
+import type { RecoveryPanelHandle } from "@/components/RecoveryPanel"
 import type { AuditEvent, ExportFormat, Task } from "@/types"
 
 const EXPORTABLE_STATUSES: Task["status"][] = [
@@ -100,6 +102,9 @@ export default function TaskDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isFileTreeExpanded, setIsFileTreeExpanded] = useState(true)
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
+  const panelRef = useRef<RecoveryPanelHandle>(null)
+  const [panelCanStart, setPanelCanStart] = useState(false)
+  const [panelIsStarting, setPanelIsStarting] = useState(false)
 
   const loadTask = useCallback(async (id: string) => {
     setLoading(true)
@@ -263,7 +268,7 @@ export default function TaskDetailPage() {
                 <FileArchive className="h-5 w-5" />
               </div>
 
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h1 className="af-display break-all text-[22px] font-bold text-foreground">
                   {task.file_name}
                 </h1>
@@ -271,6 +276,21 @@ export default function TaskDetailPage() {
                   {task.file_path}
                 </p>
               </div>
+
+              {hasRecoveryPanel && panelCanStart && (
+                <button
+                  onClick={() => panelRef.current?.triggerStart()}
+                  disabled={panelIsStarting}
+                  className="shrink-0 flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-px transition-all disabled:bg-primary/60 disabled:cursor-not-allowed"
+                >
+                  {panelIsStarting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4" />
+                  )}
+                  {panelIsStarting ? t("starting") : t("start_recovery")}
+                </button>
+              )}
             </div>
 
             <div className="af-panel mb-5 flex flex-wrap items-center gap-4 px-5 py-4 text-sm text-muted-foreground">
@@ -316,9 +336,13 @@ export default function TaskDetailPage() {
             {hasRecoveryPanel && (
               <div className="af-panel p-5">
                 <RecoveryPanel
+                  ref={panelRef}
                   task={task}
                   onTaskStatusChange={handleRecoveryStatusChange}
                   onAuditEventsChange={setAuditEvents}
+                  onCanStartChange={setPanelCanStart}
+                  onIsStartingChange={setPanelIsStarting}
+                  hideStartButton
                 />
               </div>
             )}

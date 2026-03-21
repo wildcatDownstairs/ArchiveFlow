@@ -6,7 +6,7 @@
  * @dependencies react, react-i18next, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useImperativeHandle, useRef, forwardRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Play,
@@ -62,10 +62,17 @@ const MAX_RECENT_AUDIT_EVENTS = 5
 
 type AttackTab = "dictionary" | "bruteforce" | "mask"
 
+export interface RecoveryPanelHandle {
+  triggerStart: () => void
+}
+
 interface RecoveryPanelProps {
   task: Task
   onTaskStatusChange?: () => void
   onAuditEventsChange?: (events: AuditEvent[]) => void
+  onCanStartChange?: (canStart: boolean) => void
+  onIsStartingChange?: (isStarting: boolean) => void
+  hideStartButton?: boolean
 }
 
 /**
@@ -73,13 +80,20 @@ interface RecoveryPanelProps {
  * @param root0
  * @param root0.task
  * @param root0.onTaskStatusChange
-  * @returns {JSX.Element} 渲染的 React 元素
+ * @param root0.onAuditEventsChange
+ * @param root0.onCanStartChange
+ * @param root0.onIsStartingChange
+ * @param root0.hideStartButton
+   * @returns {JSX.Element} 渲染的 React 元素
  */
-export default function RecoveryPanel({
+const RecoveryPanel = forwardRef<RecoveryPanelHandle, RecoveryPanelProps>(function RecoveryPanel({
   task,
   onTaskStatusChange,
   onAuditEventsChange,
-}: RecoveryPanelProps) {
+  onCanStartChange,
+  onIsStartingChange,
+  hideStartButton = false,
+}: RecoveryPanelProps, ref) {
   const { t } = useTranslation()
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
   const recoveryDrafts = useAppStore((state) => state.recoveryDrafts)
@@ -589,6 +603,16 @@ const handleCopy = async (password: string) => {
       effectiveTaskStatus === "interrupted"
     )
   const canResume = canStart && checkpoint !== null
+
+  // 将 canStart / isStarting 状态同步给父组件（用于在页面标题区渲染按钮）
+  useEffect(() => { onCanStartChange?.(canStart) }, [canStart, onCanStartChange])
+  useEffect(() => { onIsStartingChange?.(isStarting) }, [isStarting, onIsStartingChange])
+
+  // 暴露 triggerStart 给父组件（通过 ref）— 无 deps 数组，每次渲染后更新，
+  // 确保始终持有最新的 handleStart 闭包。
+  useImperativeHandle(ref, () => ({
+    triggerStart: () => { void handleStart() },
+  }))
 
   return (
     <section className="space-y-4">
@@ -1151,13 +1175,10 @@ const handleCopy = async (password: string) => {
                 </p>
               </div>
 
-              {/* 密码长度 */}
-              <div className="bg-muted/30 rounded-2xl p-6">
-                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-                  {t("min_length")} / {t("max_length")}
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
+              {/* 密码长度 + 优先级 — 紧凑单行 */}
+              <div className="bg-muted/30 rounded-2xl p-4">
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
                     <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                       {t("min_length")}
                     </label>
@@ -1167,10 +1188,10 @@ const handleCopy = async (password: string) => {
                       onChange={(e) => setMinLength(Math.max(1, parseInt(e.target.value) || 1))}
                       min={1}
                       max={12}
-                      className="w-full bg-muted/50 rounded-[10px] px-3.5 py-3 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
+                      className="w-full bg-muted/50 rounded-[10px] px-3 py-2.5 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
                     />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                       {t("max_length")}
                     </label>
@@ -1180,8 +1201,34 @@ const handleCopy = async (password: string) => {
                       onChange={(e) => setMaxLength(Math.max(1, parseInt(e.target.value) || 1))}
                       min={1}
                       max={12}
-                      className="w-full bg-muted/50 rounded-[10px] px-3.5 py-3 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
+                      className="w-full bg-muted/50 rounded-[10px] px-3 py-2.5 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
                     />
+                  </div>
+                  <div className="shrink-0">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      {t("scheduler_priority")}
+                    </label>
+                    <div className="flex items-center bg-muted/50 rounded-[10px] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setPriority((p) => Math.max(0, p - 1))}
+                        className="w-9 h-[42px] flex items-center justify-center text-lg text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+                        aria-label="decrease priority"
+                      >
+                        −
+                      </button>
+                      <span className="min-w-[36px] text-center text-[15px] font-medium">
+                        {priority}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPriority((p) => p + 1)}
+                        className="w-9 h-[42px] flex items-center justify-center text-lg text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+                        aria-label="increase priority"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1224,7 +1271,8 @@ const handleCopy = async (password: string) => {
             </div>
           )}
 
-          {/* 优先级 stepper — 所有 tab 共用 */}
+          {/* 优先级 stepper — 字典/掩码 tab 共用（暴力破解 tab 已内联） */}
+          {activeTab !== "bruteforce" && (
           <div className="bg-muted/30 rounded-2xl p-6">
             <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
               {t("scheduler_priority")}
@@ -1254,6 +1302,7 @@ const handleCopy = async (password: string) => {
               </div>
             </div>
           </div>
+          )}
 
           {/* 恢复后端 */}
           <div className="bg-muted/30 rounded-2xl p-6">
@@ -1336,7 +1385,8 @@ const handleCopy = async (password: string) => {
             </div>
           )}
 
-          {/* 开始按钮 — 全宽，漂浮感 */}
+          {/* 开始按钮 — 全宽，漂浮感（可由父组件隐藏，移至页面标题区） */}
+          {!hideStartButton && (
           <button
             onClick={() => void handleStart()}
             disabled={isStarting}
@@ -1354,8 +1404,11 @@ const handleCopy = async (password: string) => {
             )}
             {isStarting ? t("starting") : t("start_recovery")}
           </button>
+          )}
         </div>
       )}
     </section>
   )
-}
+})
+
+export default RecoveryPanel
