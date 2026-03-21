@@ -22,8 +22,9 @@ import {
   ShieldCheck,
   ShieldAlert,
   Download,
+  Zap,
 } from "lucide-react"
-import { save } from "@tauri-apps/plugin-dialog"
+import { save, ask } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/stores/appStore"
@@ -125,6 +126,7 @@ export default function TaskDetailPage() {
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
   const { currentTask, fetchTask, removeTask } = useTaskStore()
   const [loading, setLoading] = useState(true)
+  const [isDeleting, setIsDeleting] = useState(false)
 
 
 
@@ -155,12 +157,17 @@ export default function TaskDetailPage() {
  * @returns {any} 默认返回
  */
   const handleDelete = async () => {
-    if (!taskId || !window.confirm(t("delete_confirm"))) return
+    if (!taskId) return
+    const confirmed = await ask(t("delete_confirm"), { kind: "warning" })
+    if (!confirmed) return
+    setIsDeleting(true)
     try {
       await removeTask(taskId)
       navigate("/tasks")
     } catch (err) {
       console.error("Failed to delete task:", err)
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -256,9 +263,14 @@ const handleExport = async (format: ExportFormat) => {
           )}
           <button
             onClick={() => void handleDelete()}
-            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors border border-red-200"
+            disabled={isDeleting}
+            className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors border border-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Trash2 className="h-4 w-4" />
+            {isDeleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
             {t("delete")}
           </button>
         </div>
@@ -275,94 +287,109 @@ const handleExport = async (format: ExportFormat) => {
         </div>
       </div>
 
-      {/* 概览卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* 类型 */}
-        <div className="rounded-lg border p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("file_type")}</p>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-medium",
-              TYPE_BADGE_COLORS[task.archive_type],
-            )}
-          >
-            {t(`type_${task.archive_type}`)}
-          </span>
-        </div>
-
-        {/* 状态 */}
-        <div className="rounded-lg border p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("file_status")}</p>
-          <span
-            className={cn(
-              "inline-flex items-center rounded-full px-2.5 py-1 text-sm font-medium",
-              STATUS_BADGE_COLORS[task.status],
-            )}
-          >
-            {t(`status_${task.status}`)}
-          </span>
-        </div>
-
-        {/* 文件大小 */}
-        <div className="rounded-lg border p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("file_size")}</p>
-          <div className="flex items-center gap-2">
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">
-              {formatFileSize(task.file_size)}
-            </span>
+      {/* 综合信息条 */}
+      <div className="rounded-lg border bg-card shadow-sm p-4 md:p-5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-row lg:flex-wrap lg:items-center lg:justify-between gap-6">
+          {/* 类型 */}
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+              <FileArchive className="h-3.5 w-3.5" />
+              {t("file_type")}
+            </p>
+            <div>
+              <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", TYPE_BADGE_COLORS[task.archive_type])}>
+                {t(`type_${task.archive_type}`)}
+              </span>
+            </div>
           </div>
-        </div>
 
-        {/* 加密状态 */}
-        <div className="rounded-lg border p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("encryption")}</p>
-          {info ? (
-            info.is_encrypted ? (
-              <div className="flex items-center gap-2 text-amber-600">
-                <ShieldAlert className="h-4 w-4" />
-                <span className="text-sm font-medium">{t("encrypted")}</span>
+          {/* 状态 */}
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+              <Zap className="h-3.5 w-3.5" />
+              {t("file_status")}
+            </p>
+            <div>
+              <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", STATUS_BADGE_COLORS[task.status])}>
+                {t(`status_${task.status}`)}
+              </span>
+            </div>
+          </div>
+
+          {/* 大小 */}
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+              <HardDrive className="h-3.5 w-3.5" />
+              {t("file_size")}
+            </p>
+            <p className="text-sm font-semibold">{formatFileSize(task.file_size)}</p>
+          </div>
+
+          {/* 加密状态 */}
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {t("encryption")}
+            </p>
+            <div className="flex items-center">
+              {info ? (
+                info.is_encrypted ? (
+                  <span className="flex items-center gap-1 text-sm font-semibold text-amber-600 dark:text-amber-500">
+                    <ShieldAlert className="h-4 w-4" />
+                    {t("encrypted")}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-sm font-semibold text-green-600 dark:text-green-500">
+                    <ShieldCheck className="h-4 w-4" />
+                    {t("not_encrypted")}
+                  </span>
+                )
+              ) : (
+                <span className="text-sm font-semibold text-muted-foreground">-</span>
+              )}
+            </div>
+          </div>
+
+          {info && (
+            <>
+              {/* 大屏分割线 */}
+              <div className="hidden lg:block w-px h-8 bg-border mx-2"></div>
+
+              {/* 总文件数 */}
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                  <Files className="h-3.5 w-3.5" />
+                  {t("total_entries")}
+                </p>
+                <p className="text-sm font-semibold">{info.total_entries}</p>
               </div>
-            ) : (
-              <div className="flex items-center gap-2 text-green-600">
-                <ShieldCheck className="h-4 w-4" />
-                <span className="text-sm font-medium">{t("not_encrypted")}</span>
+
+              {/* 解压大小 */}
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                  <HardDrive className="h-3.5 w-3.5" />
+                  {t("uncompressed_size")}
+                </p>
+                <p className="text-sm font-semibold">{formatFileSize(info.total_size)}</p>
               </div>
-            )
-          ) : (
-            <span className="text-sm text-muted-foreground">-</span>
+
+              {/* 加密文件数 */}
+              <div className="space-y-1.5">
+                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" />
+                  {t("encrypted_entries")}
+                </p>
+                <p className="text-sm font-semibold">
+                  <span className={info.entries.some((e) => e.is_encrypted) ? "text-amber-600 dark:text-amber-500" : ""}>
+                    {info.entries.filter((e) => e.is_encrypted).length}
+                  </span>
+                  <span className="text-muted-foreground font-normal ml-0.5">/ {info.entries.filter((e) => !e.is_directory).length}</span>
+                </p>
+              </div>
+            </>
           )}
         </div>
       </div>
-
-      {/* 归档详情 */}
-      {info && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="rounded-lg border p-4 flex items-center gap-3">
-            <Files className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-xs text-muted-foreground">{t("total_entries")}</p>
-              <p className="text-lg font-semibold">{info.total_entries}</p>
-            </div>
-          </div>
-          <div className="rounded-lg border p-4 flex items-center gap-3">
-            <HardDrive className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-xs text-muted-foreground">{t("uncompressed_size")}</p>
-              <p className="text-lg font-semibold">{formatFileSize(info.total_size)}</p>
-            </div>
-          </div>
-          <div className="rounded-lg border p-4 flex items-center gap-3">
-            <Lock className="h-5 w-5 text-muted-foreground" />
-            <div>
-              <p className="text-xs text-muted-foreground">{t("encrypted_entries")}</p>
-              <p className="text-lg font-semibold">
-                {info.entries.filter((e) => e.is_encrypted).length} / {info.entries.filter((e) => !e.is_directory).length}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 时间信息 */}
       <div className="flex gap-6 text-sm text-muted-foreground">
@@ -377,27 +404,39 @@ const handleExport = async (format: ExportFormat) => {
         </div>
       )}
 
-      {/* 文件树 */}
-      {info && info.entries.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold">{t("archive_contents")}</h2>
-          <div className="max-h-[26rem] rounded-lg border bg-card p-4 overflow-y-auto">
-            {fileTree.map((node) => (
-              <FileTreeNode key={node.path} node={node} t={t} />
-            ))}
+      {/* 主体内容：双列布局 */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* 左侧：文件树 */}
+        {info && info.entries.length > 0 && (
+          <div
+            className={cn(
+              "flex flex-col gap-6",
+              (task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted
+                ? "lg:col-span-5 xl:col-span-4"
+                : "lg:col-span-12"
+            )}
+          >
+            <section className="space-y-3">
+              <h2 className="text-lg font-semibold">{t("archive_contents")}</h2>
+              <div className="max-h-[calc(100vh-24rem)] min-h-[20rem] rounded-lg border bg-card p-4 overflow-y-auto">
+                {fileTree.map((node) => (
+                  <FileTreeNode key={node.path} node={node} t={t} />
+                ))}
+              </div>
+            </section>
           </div>
-        </section>
-      )}
+        )}
 
-      {/* 密码恢复面板 - 仅在有加密文件时显示 */}
-      {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
-        <div>
-          <RecoveryPanel
-            task={task}
-            onTaskStatusChange={handleRecoveryStatusChange}
-          />
-        </div>
-      )}
+        {/* 右侧：密码恢复面板 - 仅在有加密文件时显示 */}
+        {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
+          <div className="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
+            <RecoveryPanel
+              task={task}
+              onTaskStatusChange={handleRecoveryStatusChange}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
