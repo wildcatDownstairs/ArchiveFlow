@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 RecoveryPanel.test UI 组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies @testing-library/react, @testing-library/user-event, vitest, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
+ */
+
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"

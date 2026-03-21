@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：多语言国际化配置与资源管理
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies i18next, react-i18next
+ */
+
 import i18n from "i18next"
 import { initReactI18next } from "react-i18next"
 
@@ -196,6 +204,7 @@ const resources = {
       detect_hashcat: "检测 hashcat",
       hashcat_detected: "已检测到可用的 hashcat GPU 环境",
       hashcat_not_detected: "未检测到可用的 hashcat GPU 环境",
+      gpu_requires_hashcat: "请先在设置页配置并检测 hashcat，再使用 GPU 恢复",
       hashcat_devices: "检测到的设备",
       auto_clear_dictionary_input: "启动恢复后自动清理字典输入",
       result_retention_policy: "结果保留策略",
@@ -421,6 +430,7 @@ const resources = {
       detect_hashcat: "Detect Hashcat",
       hashcat_detected: "A usable hashcat GPU environment was detected",
       hashcat_not_detected: "No usable hashcat GPU environment was detected",
+      gpu_requires_hashcat: "Please configure and detect hashcat in Settings before using GPU recovery",
       hashcat_devices: "Detected Devices",
       auto_clear_dictionary_input: "Clear dictionary input after start",
       result_retention_policy: "Result Retention Policy",

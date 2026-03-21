@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 BootScreen UI 组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-i18next
+ */
+
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import * as api from "@/services/api"
@@ -13,6 +21,12 @@ const TOTAL_STEPS = 6
 // Steps run sequentially; each resolves before the next begins.
 type StepRunner = () => Promise<void>
 
+/**
+ *
+ * @param root0
+ * @param root0.onComplete
+  * @returns {JSX.Element} 渲染的 React 元素
+ */
 export default function BootScreen({ onComplete }: Props) {
   const { t } = useTranslation()
   const fetchTasks = useTaskStore((s) => s.fetchTasks)
@@ -58,6 +72,10 @@ export default function BootScreen({ onComplete }: Props) {
       () => new Promise((r) => setTimeout(r, 400)),
     ]
 
+    /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
     async function run() {
       for (let i = 0; i < steps.length; i++) {
         setCurrentStep(i + 1)

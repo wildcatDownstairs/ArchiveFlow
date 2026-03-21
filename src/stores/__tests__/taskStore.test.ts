@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 taskStore.test 状态管理
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies vitest
+ */
+
 import { vi } from "vitest"
 import type { Task } from "@/types"
 
@@ -27,6 +35,11 @@ import * as api from "@/services/api"
 
 const mockedApi = vi.mocked(api)
 
+/**
+ *
+ * @param overrides
+  * @returns {any} 执行结果
+ */
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: "task-1",

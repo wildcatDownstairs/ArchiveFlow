@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 ReportPage 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-router-dom, react-i18next, lucide-react
+ */
+
 import { useState, useEffect, useCallback } from "react"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -55,6 +63,10 @@ const ALL_EVENT_TYPES: AuditEventType[] = [
   "cache_cleared",
 ]
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function ReportPage() {
   const { t } = useTranslation()
   const [events, setEvents] = useState<AuditEvent[]>([])

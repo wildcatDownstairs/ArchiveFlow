@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 SettingsPage.test 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies @testing-library/react, @testing-library/user-event, vitest
+ */
+
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"

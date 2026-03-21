@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：本文件提供 setup.ts 模块的实现
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies vitest
+ */
+
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
 

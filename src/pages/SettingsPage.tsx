@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 SettingsPage 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-i18next
+ */
+
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -25,11 +33,20 @@ import {
 } from "@/services/api"
 import type { HashcatDetectionResult } from "@/types"
 
+/**
+ *
+ * @param value
+  * @returns {any} 执行结果
+ */
 function stringifySetting(value: unknown): string {
   if (typeof value === "string") return value
   return JSON.stringify(value)
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function SettingsPage() {
   const { t, i18n } = useTranslation()
   const setLocale = useAppStore((s) => s.setLocale)
@@ -44,6 +61,10 @@ export default function SettingsPage() {
   const [hashcatStatus, setHashcatStatus] = useState<HashcatDetectionResult | null>(null)
   const [hashcatChecking, setHashcatChecking] = useState(false)
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const loadStats = async () => {
     try {
       const [tasks, audits] = await getStats()
@@ -79,7 +100,14 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
+  /**
+   *
+   * @param key
+   * @param oldValue
+   * @param newValue
+    * @returns {any} 执行结果
+ */
+const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
     try {
       await recordSettingChange(
         key,
@@ -91,7 +119,12 @@ export default function SettingsPage() {
     }
   }
 
-  const handleLanguageChange = async (lng: string) => {
+  /**
+   *
+   * @param lng
+    * @returns {any} 执行结果
+ */
+const handleLanguageChange = async (lng: string) => {
     if (lng === currentLang) return
 
     void i18n.changeLanguage(lng)
@@ -99,7 +132,13 @@ export default function SettingsPage() {
     await persistSettingChange("language", currentLang, lng)
   }
 
-  const handleCharsetFlagChange = async (key: keyof CharsetFlags, value: boolean) => {
+  /**
+   *
+   * @param key
+   * @param value
+    * @returns {any} 执行结果
+ */
+const handleCharsetFlagChange = async (key: keyof CharsetFlags, value: boolean) => {
     const oldFlags = recoveryPreferences.defaultCharsetFlags
     if (oldFlags[key] === value) return
 
@@ -112,7 +151,13 @@ export default function SettingsPage() {
     )
   }
 
-  const handleNumericPreferenceChange = async (
+  /**
+   *
+   * @param key
+   * @param value
+    * @returns {any} 执行结果
+ */
+const handleNumericPreferenceChange = async (
     key: "defaultMinLength" | "defaultMaxLength" | "defaultTaskPriority",
     value: number,
   ) => {
@@ -123,7 +168,13 @@ export default function SettingsPage() {
     await persistSettingChange(`recovery.${key}`, recoveryPreferences[key], normalized)
   }
 
-  const handleBooleanPreferenceChange = async (
+  /**
+   *
+   * @param key
+   * @param value
+    * @returns {any} 执行结果
+ */
+const handleBooleanPreferenceChange = async (
     key:
       | "autoIncludeFilenamePatterns"
       | "autoClearDictionaryInput"
@@ -137,7 +188,12 @@ export default function SettingsPage() {
     await persistSettingChange(`recovery.${key}`, recoveryPreferences[key], value)
   }
 
-  const handleRetentionPolicyChange = async (value: ResultRetentionPolicy) => {
+  /**
+   *
+   * @param value
+    * @returns {any} 执行结果
+ */
+const handleRetentionPolicyChange = async (value: ResultRetentionPolicy) => {
     if (recoveryPreferences.resultRetentionPolicy === value) return
 
     updateRecoveryPreferences({ resultRetentionPolicy: value })
@@ -148,7 +204,12 @@ export default function SettingsPage() {
     )
   }
 
-  const handleSchedulerLimitChange = async (value: number) => {
+  /**
+   *
+   * @param value
+    * @returns {any} 执行结果
+ */
+const handleSchedulerLimitChange = async (value: number) => {
     const normalized = Math.max(1, value)
     if (recoveryPreferences.maxConcurrentRecoveries === normalized) return
 
@@ -165,6 +226,10 @@ export default function SettingsPage() {
     )
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleHashcatPathCommit = async () => {
     const normalized = hashcatPathInput.trim()
     if (recoveryPreferences.hashcatPath === normalized) {
@@ -177,6 +242,10 @@ export default function SettingsPage() {
     await persistSettingChange("recovery.hashcatPath", recoveryPreferences.hashcatPath, normalized)
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleDetectHashcat = async () => {
     setHashcatChecking(true)
     try {
@@ -199,6 +268,10 @@ export default function SettingsPage() {
     }
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleClearTasks = async () => {
     try {
       await clearAllTasks()
@@ -209,6 +282,10 @@ export default function SettingsPage() {
     }
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleClearAudit = async () => {
     try {
       await clearAuditEvents()

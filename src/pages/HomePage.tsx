@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 HomePage 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-router-dom, react-i18next, lucide-react, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs, @tauri-apps/api/event
+ */
+
 import { useState, useEffect, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -30,6 +38,10 @@ const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
   interrupted: "bg-orange-100 text-orange-800",
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function HomePage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -68,6 +80,11 @@ export default function HomePage() {
     [importArchive, navigate],
   )
 
+  /**
+   * 检查文件后缀是否在允许的列表中
+   * @param path - 文件路径
+   * @returns {boolean} 是否允许
+   */
   const isAllowedFile = (path: string): boolean => {
     const ext = path.split(".").pop()?.toLowerCase() ?? ""
     return ALLOWED_EXTENSIONS.includes(ext)

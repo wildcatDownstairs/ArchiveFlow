@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：提供 recoveryObservability.test 基础库和工具函数
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies vitest, i18next
+ */
+
 import { describe, expect, it } from "vitest"
 import {
   describeObservedMode,

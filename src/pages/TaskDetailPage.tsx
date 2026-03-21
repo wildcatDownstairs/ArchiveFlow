@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 TaskDetailPage 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-router-dom, react-i18next, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
+ */
+
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -55,6 +63,13 @@ const EXPORTABLE_STATUSES: Task["status"][] = [
 const EXPORT_BUTTON_CLASS_NAME =
   "flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
 
+/**
+ *
+ * @param root0
+ * @param root0.node
+ * @param root0.t
+  * @returns {JSX.Element} 渲染的 React 元素
+ */
 function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string }) {
   const [expanded, setExpanded] = useState(true)
 
@@ -99,6 +114,10 @@ function FileTreeNode({ node, t }: { node: TreeNode; t: (key: string) => string 
   )
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function TaskDetailPage() {
   const { t } = useTranslation()
   const { taskId } = useParams<{ taskId: string }>()
@@ -131,6 +150,10 @@ export default function TaskDetailPage() {
     }
   }, [taskId, fetchTask])
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleDelete = async () => {
     if (!taskId || !window.confirm(t("delete_confirm"))) return
     try {
@@ -141,7 +164,12 @@ export default function TaskDetailPage() {
     }
   }
 
-  const handleExport = async (format: ExportFormat) => {
+  /**
+   *
+   * @param format
+    * @returns {any} 执行结果
+ */
+const handleExport = async (format: ExportFormat) => {
     if (!currentTask) return
     const defaultName = buildExportFileName(format, currentTask.file_name)
     const ext = format === "csv" ? "csv" : "json"

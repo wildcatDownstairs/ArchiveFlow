@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 TaskPage 页面组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-router-dom, react-i18next, lucide-react, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
+ */
+
 import { useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
@@ -37,6 +45,10 @@ const EXPORTABLE_STATUSES: Task["status"][] = [
   "interrupted",
 ]
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function TaskPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -47,6 +59,11 @@ export default function TaskPage() {
     void fetchTasks()
   }, [fetchTasks])
 
+  /**
+   *
+   * @param e
+   * @param taskId
+   */
   const handleDelete = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation()
     if (!window.confirm(t("delete_confirm"))) return
@@ -63,7 +80,12 @@ export default function TaskPage() {
 
 
 
-  const handleExportAll = async (format: ExportFormat) => {
+  /**
+   *
+   * @param format
+    * @returns {any} 执行结果
+ */
+const handleExportAll = async (format: ExportFormat) => {
     if (exportableTasks.length === 0) {
       window.alert(t("export_no_tasks"))
       return

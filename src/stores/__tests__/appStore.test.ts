@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 appStore.test 状态管理
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies 无
+ */
+
 import { useAppStore } from "../appStore"
 
 describe("appStore", () => {

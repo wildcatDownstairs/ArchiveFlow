@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 RecoveryPanel UI 组件
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react, react-i18next, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -51,6 +59,13 @@ interface RecoveryPanelProps {
   onTaskStatusChange?: () => void
 }
 
+/**
+ *
+ * @param root0
+ * @param root0.task
+ * @param root0.onTaskStatusChange
+  * @returns {JSX.Element} 渲染的 React 元素
+ */
 export default function RecoveryPanel({
   task,
   onTaskStatusChange,
@@ -225,6 +240,9 @@ export default function RecoveryPanel({
           value?.priority ??
           recoveryPreferences.defaultTaskPriority,
         )
+        if (scheduled?.backend) {
+          setBackend(scheduled.backend)
+        }
 
         if (!value) return
         if (value.mode.type === "mask") {
@@ -256,6 +274,10 @@ export default function RecoveryPanel({
     return charset
   }, [charsetFlags, customCharset, useCustomCharset])
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleImportDictionaryFile = async () => {
     try {
       const selected = await open({
@@ -278,9 +300,20 @@ export default function RecoveryPanel({
   }
 
   // 开始恢复
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleStart = async () => {
     setError(null)
     setProgress(null)
+
+    // GPU 模式前置校验：未配置 hashcat 时直接给用户友好提示，
+    // 避免把后端的原始中文错误信息直接展示出来。
+    if (backend === "gpu" && !recoveryPreferences.hashcatPath?.trim()) {
+      setError(t("gpu_requires_hashcat"))
+      return
+    }
 
     try {
       if (activeTab === "dictionary") {
@@ -365,6 +398,10 @@ export default function RecoveryPanel({
   }
 
   // 取消恢复
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleCancel = async () => {
     try {
       await api.cancelRecovery(task.id)
@@ -377,6 +414,10 @@ export default function RecoveryPanel({
     }
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handlePause = async () => {
     try {
       await api.pauseRecovery(task.id)
@@ -389,6 +430,10 @@ export default function RecoveryPanel({
     }
   }
 
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   const handleResume = async () => {
     setError(null)
     try {
@@ -406,7 +451,12 @@ export default function RecoveryPanel({
   }
 
   // 复制密码
-  const handleCopy = async (password: string) => {
+  /**
+   *
+   * @param password
+    * @returns {any} 执行结果
+ */
+const handleCopy = async (password: string) => {
     try {
       await navigator.clipboard.writeText(password)
       setCopied(true)

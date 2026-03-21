@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：实现 appStore 状态管理
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies zustand
+ */
+
 import { create } from "zustand"
 
 const LOCALE_STORAGE_KEY = "archiveflow.locale"
@@ -56,6 +64,10 @@ const DEFAULT_RECOVERY_DRAFTS: RecoveryDrafts = {
   dictionarySourceName: null,
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 function getInitialLocale(): string {
   if (typeof window === "undefined") return "zh"
 
@@ -67,6 +79,10 @@ function getInitialLocale(): string {
   }
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 function getInitialRecoveryPreferences(): RecoveryPreferences {
   if (typeof window === "undefined") return DEFAULT_RECOVERY_PREFERENCES
 
@@ -88,6 +104,10 @@ function getInitialRecoveryPreferences(): RecoveryPreferences {
   }
 }
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 function getInitialRecoveryDrafts(): RecoveryDrafts {
   if (typeof window === "undefined") return DEFAULT_RECOVERY_DRAFTS
 
@@ -118,6 +138,11 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   locale: getInitialLocale(),
+  /**
+   * 设置本地语言
+   * @param locale - 语言代码
+   * @returns {void}
+   */
   setLocale: (locale: string) => {
     if (typeof window !== "undefined") {
       try {
@@ -129,6 +154,11 @@ export const useAppStore = create<AppState>((set) => ({
     set({ locale })
   },
   recoveryPreferences: getInitialRecoveryPreferences(),
+  /**
+   * 更新恢复偏好设置
+   * @param patch - 偏好设置更新对象
+   * @returns {void}
+   */
   updateRecoveryPreferences: (patch) =>
     set((state) => {
       const next = {
@@ -154,6 +184,11 @@ export const useAppStore = create<AppState>((set) => ({
       return { recoveryPreferences: next }
     }),
   recoveryDrafts: getInitialRecoveryDrafts(),
+  /**
+   * 更新恢复草稿
+   * @param patch - 草稿更新对象
+   * @returns {void}
+   */
   updateRecoveryDrafts: (patch) =>
     set((state) => {
       const next = {
@@ -175,5 +210,9 @@ export const useAppStore = create<AppState>((set) => ({
       return { recoveryDrafts: next }
     }),
   sidebarCollapsed: false,
+  /**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
 }))

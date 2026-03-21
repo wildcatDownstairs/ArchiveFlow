@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：本文件提供 MainLayout.tsx 模块的实现
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies react-router-dom, react-i18next, lucide-react
+ */
+
 import { NavLink, Outlet } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { Home, ListTodo, FileText, Settings } from "lucide-react"
@@ -10,6 +18,10 @@ const navItems = [
   { to: "/settings", icon: Settings, labelKey: "settings" },
 ] as const
 
+/**
+ * 该方法/组件暂无详细描述，由自动脚本补充
+ * @returns {any} 默认返回
+ */
 export default function MainLayout() {
   const { t } = useTranslation()
 

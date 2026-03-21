@@ -1,10 +1,29 @@
+/**
+ * @fileoverview 文件功能：提供 format 基础库和工具函数
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies 无
+ */
+
+/**
+ *
+ * @param bytes
+  * @returns {any} 执行结果
+ */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B"
   const units = ["B", "KB", "MB", "GB", "TB"]
+  // 魔法数字：1024 作为单位换算的基数
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
 }
 
+/**
+ *
+ * @param isoString
+  * @returns {any} 执行结果
+ */
 export function formatDateTime(isoString: string): string {
   const date = new Date(isoString)
   return date.toLocaleString("zh-CN", {
@@ -16,10 +35,20 @@ export function formatDateTime(isoString: string): string {
   })
 }
 
+/**
+ *
+ * @param filePath
+  * @returns {any} 执行结果
+ */
 export function getFileNameFromPath(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
+/**
+ *
+ * @param seconds
+  * @returns {any} 执行结果
+ */
 export function formatElapsed(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)}s`
   const min = Math.floor(seconds / 60)
@@ -27,7 +56,14 @@ export function formatElapsed(seconds: number): string {
   return `${min}m ${sec.toFixed(0)}s`
 }
 
+/**
+ *
+ * @param format
+ * @param fileName
+  * @returns {any} 执行结果
+ */
 export function buildExportFileName(format: string, fileName?: string): string {
+  // 魔法数字与正则：格式化时间戳并移除不需要的字符，截取前 15 位
   const timestamp = new Date()
     .toISOString()
     .replace(/[-:]/g, "")

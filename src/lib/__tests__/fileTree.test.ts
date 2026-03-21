@@ -1,6 +1,19 @@
+/**
+ * @fileoverview 文件功能：提供 fileTree.test 基础库和工具函数
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies 无
+ */
+
 import { buildFileTree } from "../fileTree"
 import type { ArchiveEntry } from "@/types"
 
+/**
+ *
+ * @param overrides
+  * @returns {any} 执行结果
+ */
 function makeEntry(overrides: Partial<ArchiveEntry> & Pick<ArchiveEntry, "path">): ArchiveEntry {
   return {
     size: 0,

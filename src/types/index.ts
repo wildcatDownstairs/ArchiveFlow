@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：定义全局类型与接口
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies 无
+ */
+
 export interface Task {
   id: string
   file_path: string

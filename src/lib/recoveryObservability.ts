@@ -1,3 +1,11 @@
+/**
+ * @fileoverview 文件功能：提供 recoveryObservability 基础库和工具函数
+ * @author ArchiveFlow Team
+ * @created 2026-03-21
+ * @modified 2026-03-21
+ * @dependencies i18next
+ */
+
 import type {
   RecoveryCheckpoint,
   RecoveryProgress,
@@ -6,6 +14,13 @@ import type {
 } from "@/types"
 import type { TFunction } from "i18next"
 
+/**
+ *
+ * @param scheduledRecovery
+ * @param checkpoint
+ * @param t
+  * @returns {any} 执行结果
+ */
 export function describeObservedMode(
   scheduledRecovery: ScheduledRecovery | null,
   checkpoint: RecoveryCheckpoint | null,
@@ -26,12 +41,24 @@ export function describeObservedMode(
   }
 }
 
+/**
+ *
+ * @param progress
+  * @returns {any} 执行结果
+ */
 export function estimateEtaSeconds(progress: RecoveryProgress | null): number | null {
   if (!progress || progress.status !== "running") return null
   if (progress.speed <= 0 || progress.total <= progress.tried) return null
   return (progress.total - progress.tried) / progress.speed
 }
 
+/**
+ *
+ * @param task
+ * @param progress
+ * @param scheduledRecovery
+  * @returns {any} 执行结果
+ */
 export function getRecoveryStageKey(
   task: Task,
   progress: RecoveryProgress | null,
