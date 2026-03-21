@@ -150,6 +150,7 @@ pub fn run_recovery(
         resume_from,
         total,
     );
+    let mut last_checkpoint_at = Some(Utc::now());
 
     let start_time = Instant::now();
     let _ = app_handle.emit(
@@ -162,6 +163,8 @@ pub fn run_recovery(
             status: RecoveryStatus::Running,
             found_password: None,
             elapsed_seconds: 0.0,
+            worker_count: num_workers,
+            last_checkpoint_at,
         },
     );
 
@@ -237,6 +240,8 @@ pub fn run_recovery(
                         status: RecoveryStatus::Found,
                         found_password: Some(password.clone()),
                         elapsed_seconds: elapsed,
+                        worker_count: num_workers,
+                        last_checkpoint_at,
                     },
                 );
                 log::info!(
@@ -286,6 +291,7 @@ pub fn run_recovery(
                 current_tried,
                 total,
             );
+            last_checkpoint_at = Some(Utc::now());
             let _ = app_handle.emit(
                 "recovery-progress",
                 RecoveryProgress {
@@ -296,6 +302,8 @@ pub fn run_recovery(
                     status: RecoveryStatus::Cancelled,
                     found_password: None,
                     elapsed_seconds: elapsed,
+                    worker_count: num_workers,
+                    last_checkpoint_at,
                 },
             );
             log::info!(
@@ -326,6 +334,7 @@ pub fn run_recovery(
                 current_tried,
                 total,
             );
+            last_checkpoint_at = Some(Utc::now());
 
             let _ = app_handle.emit(
                 "recovery-progress",
@@ -337,6 +346,8 @@ pub fn run_recovery(
                     status: RecoveryStatus::Running,
                     found_password: None,
                     elapsed_seconds: elapsed,
+                    worker_count: num_workers,
+                    last_checkpoint_at,
                 },
             );
         }
@@ -361,6 +372,8 @@ pub fn run_recovery(
                     status: RecoveryStatus::Exhausted,
                     found_password: None,
                     elapsed_seconds: elapsed,
+                    worker_count: num_workers,
+                    last_checkpoint_at,
                 },
             );
             log::info!(

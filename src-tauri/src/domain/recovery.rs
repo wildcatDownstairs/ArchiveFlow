@@ -98,6 +98,12 @@ pub struct RecoveryProgress {
     pub found_password: Option<String>,
     /// 已用时间（秒，含小数）
     pub elapsed_seconds: f64,
+    /// 当前这次恢复实际启用了多少个 worker。
+    /// 对 Rust 新手来说，可以把它理解成“并行尝试密码的工作线程数量”。
+    pub worker_count: u64,
+    /// 最近一次把 checkpoint 持久化到数据库的时间。
+    /// 前端用它告诉用户“断点大概保存到了什么时候”。
+    pub last_checkpoint_at: Option<DateTime<Utc>>,
 }
 
 /// 调度状态：描述一个恢复任务在调度器中的排队位置。

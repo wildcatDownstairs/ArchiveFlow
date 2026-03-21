@@ -135,6 +135,8 @@ fn benchmark_progress_serialization(iterations: u64) -> BenchmarkSample {
             status: RecoveryStatus::Running,
             found_password: None,
             elapsed_seconds: 12.5,
+            worker_count: 8,
+            last_checkpoint_at: Some(Utc::now()),
         };
 
         for _ in 0..iterations {

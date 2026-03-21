@@ -15,11 +15,17 @@ import {
 import { open } from "@tauri-apps/plugin-dialog"
 import { readTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
-import { formatElapsed } from "@/lib/format"
+import { formatDateTime, formatElapsed } from "@/lib/format"
+import {
+  describeObservedMode,
+  estimateEtaSeconds,
+  getRecoveryStageKey,
+} from "@/lib/recoveryObservability"
 import { buildDictionaryCandidates } from "@/lib/recoveryCandidates"
 import { useAppStore } from "@/stores/appStore"
 import * as api from "@/services/api"
 import type {
+  AuditEvent,
   RecoveryCheckpoint,
   RecoveryProgress,
   RecoverySchedulerSnapshot,
@@ -35,6 +41,7 @@ const CHARSETS = {
   digits: "0123456789",
   special: "!@#$%^&*()_+-=[]{}|;:',.<>?/~`\"\\",
 }
+const MAX_RECENT_AUDIT_EVENTS = 5
 
 type AttackTab = "dictionary" | "bruteforce" | "mask"
 
@@ -77,6 +84,7 @@ export default function RecoveryPanel({
   const [checkpoint, setCheckpoint] = useState<RecoveryCheckpoint | null>(null)
   const [scheduledRecovery, setScheduledRecovery] = useState<ScheduledRecovery | null>(null)
   const [schedulerSnapshot, setSchedulerSnapshot] = useState<RecoverySchedulerSnapshot | null>(null)
+  const [recentAuditEvents, setRecentAuditEvents] = useState<AuditEvent[]>([])
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
@@ -108,6 +116,15 @@ export default function RecoveryPanel({
     }
   }, [task.id, task.status])
 
+  const refreshAuditEvents = useCallback(async () => {
+    try {
+      const events = await api.getTaskAuditEvents(task.id)
+      setRecentAuditEvents(events.slice(0, MAX_RECENT_AUDIT_EVENTS))
+    } catch {
+      setRecentAuditEvents([])
+    }
+  }, [task.id])
+
   // 监听恢复进度
   useEffect(() => {
     if (!isRunning) return
@@ -123,6 +140,7 @@ export default function RecoveryPanel({
         setIsRunning(false)
         setScheduledRecovery(null)
         void refreshSchedulerState({ respectTaskStatus: false })
+        void refreshAuditEvents()
         onTaskStatusChange?.()
       }
     }).then((unlisten) => {
@@ -138,7 +156,7 @@ export default function RecoveryPanel({
       unlistenRef.current?.()
       unlistenRef.current = null
     }
-  }, [isRunning, task.id, onTaskStatusChange, refreshSchedulerState])
+  }, [isRunning, task.id, onTaskStatusChange, refreshAuditEvents, refreshSchedulerState])
 
   useEffect(() => {
     void api
@@ -157,6 +175,13 @@ export default function RecoveryPanel({
       })
       .catch(() => {})
   }, [recoveryPreferences.maxConcurrentRecoveries])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshAuditEvents()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshAuditEvents])
 
   useEffect(() => {
     if (isRunning) return
@@ -285,6 +310,7 @@ export default function RecoveryPanel({
       }
       await refreshSchedulerState({ respectTaskStatus: false })
       onTaskStatusChange?.()
+      void refreshAuditEvents()
     } catch (e) {
       setError(String(e))
     }
@@ -296,6 +322,7 @@ export default function RecoveryPanel({
       await api.cancelRecovery(task.id)
       setIsRunning(false)
       await refreshSchedulerState({ respectTaskStatus: false })
+      await refreshAuditEvents()
     } catch (e) {
       setError(String(e))
     }
@@ -306,6 +333,7 @@ export default function RecoveryPanel({
       await api.pauseRecovery(task.id)
       setIsRunning(false)
       await refreshSchedulerState({ respectTaskStatus: false })
+      await refreshAuditEvents()
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -318,6 +346,7 @@ export default function RecoveryPanel({
       const nextState = await api.resumeRecovery(task.id)
       setIsRunning(nextState === "running")
       await refreshSchedulerState({ respectTaskStatus: false })
+      await refreshAuditEvents()
       onTaskStatusChange?.()
     } catch (e) {
       setError(String(e))
@@ -345,6 +374,10 @@ export default function RecoveryPanel({
   const showRunningProgress = isRunning && progress?.status === "running"
   const showCancelButton =
     isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
+  const observedModeDescription = describeObservedMode(scheduledRecovery, checkpoint)
+  const etaSeconds = estimateEtaSeconds(progress)
+  const stageKey = getRecoveryStageKey(task, progress, scheduledRecovery)
+  const lastCheckpointAt = progress?.last_checkpoint_at ?? checkpoint?.updated_at ?? null
 
   const terminalStatus:
     | Exclude<RecoveryStatus, "running">
@@ -504,6 +537,60 @@ export default function RecoveryPanel({
         </div>
       )}
 
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="text-sm font-medium">{t("recovery_insights")}</div>
+          <div className="grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <div className="text-xs text-muted-foreground">{t("current_stage")}</div>
+              <div className="font-medium">{t(stageKey)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("worker_count")}</div>
+              <div className="font-medium">
+                {progress?.worker_count ? progress.worker_count.toLocaleString() : t("not_available")}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("current_parameters")}</div>
+              <div className="font-medium break-words">
+                {observedModeDescription ?? t("not_available")}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">{t("eta")}</div>
+              <div className="font-medium">
+                {etaSeconds !== null ? formatElapsed(etaSeconds) : t("not_available")}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <div className="text-xs text-muted-foreground">{t("last_checkpoint")}</div>
+              <div className="font-medium">
+                {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : t("not_available")}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border p-4 space-y-3">
+          <div className="text-sm font-medium">{t("recent_audit_events")}</div>
+          {recentAuditEvents.length === 0 ? (
+            <div className="text-sm text-muted-foreground">{t("no_recent_audit_events")}</div>
+          ) : (
+            <div className="space-y-3">
+              {recentAuditEvents.map((event) => (
+                <div key={event.id} className="border-l-2 border-border pl-3">
+                  <div className="text-xs text-muted-foreground">
+                    {formatDateTime(event.timestamp)}
+                  </div>
+                  <div className="text-sm leading-6">{event.description}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* 结果展示 - 如果找到密码 */}
       {terminalStatus === "found" && displayPassword && (
         <div className="rounded-lg border-2 border-green-300 bg-green-50 p-4 space-y-3">
@@ -603,7 +690,7 @@ export default function RecoveryPanel({
           </div>
 
           {/* 统计数据 */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
             <div>
               <span className="text-muted-foreground">{t("tried_count")}</span>
               <p className="font-mono font-medium">
@@ -628,6 +715,12 @@ export default function RecoveryPanel({
               </span>
               <p className="font-mono font-medium">
                 {formatElapsed(progress.elapsed_seconds)}
+              </p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">{t("worker_count")}</span>
+              <p className="font-mono font-medium">
+                {progress.worker_count.toLocaleString()}
               </p>
             </div>
           </div>

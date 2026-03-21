@@ -11,6 +11,7 @@ vi.mock("@/services/api", () => ({
   getRecoveryCheckpoint: vi.fn(),
   getScheduledRecovery: vi.fn(),
   getRecoverySchedulerSnapshot: vi.fn(),
+  getTaskAuditEvents: vi.fn(),
   setRecoverySchedulerLimit: vi.fn(),
   startRecovery: vi.fn(),
   cancelRecovery: vi.fn(),
@@ -71,6 +72,7 @@ describe("RecoveryPanel", () => {
     vi.mocked(api.getRecoverySchedulerSnapshot).mockResolvedValue(
       EMPTY_SCHEDULER_SNAPSHOT,
     )
+    vi.mocked(api.getTaskAuditEvents).mockResolvedValue([])
     vi.mocked(api.setRecoverySchedulerLimit).mockResolvedValue(
       EMPTY_SCHEDULER_SNAPSHOT,
     )
@@ -100,6 +102,8 @@ describe("RecoveryPanel", () => {
         status: "found",
         found_password: "20260320",
         elapsed_seconds: 20.2,
+        worker_count: 8,
+        last_checkpoint_at: "2026-03-21T00:00:00Z",
       })
     })
 

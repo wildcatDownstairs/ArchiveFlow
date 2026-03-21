@@ -86,6 +86,8 @@ export interface RecoveryProgress {
   status: RecoveryStatus
   found_password: string | null
   elapsed_seconds: number
+  worker_count: number
+  last_checkpoint_at: string | null
 }
 
 export type ExportFormat = "csv" | "json"
