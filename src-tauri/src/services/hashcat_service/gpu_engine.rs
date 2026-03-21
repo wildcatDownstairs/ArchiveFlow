@@ -41,12 +41,30 @@ pub fn run_gpu_recovery(
     let db = app_handle.state::<Database>();
     let _ = db.delete_recovery_checkpoint(&config.task_id);
 
+    log::info!(
+        "GPU 恢复启动: task={} file={} hashcat_path={:?}",
+        config.task_id,
+        file_path,
+        config.hashcat_path
+    );
+
     let hashcat_info = detect_hashcat(config.hashcat_path.as_deref().map(Path::new))?;
+    log::info!(
+        "hashcat 检测成功: path={} version={} devices={}",
+        hashcat_info.path.display(),
+        hashcat_info.version,
+        hashcat_info.devices.len()
+    );
     if !hashcat_info.has_usable_gpu() {
         return Err("未检测到可用 GPU 设备，无法启动 hashcat GPU 恢复".to_string());
     }
 
     let zip_hash = extract_zip_hash(Path::new(&file_path))?;
+    log::info!(
+        "hash 提取成功: mode={} hash_len={}",
+        zip_hash.hash_mode,
+        zip_hash.hash_string.len()
+    );
 
     let temp_dir = build_task_temp_dir(&app_handle, &config.task_id)?;
     let session_name = format!("archiveflow_{}", config.task_id.replace('-', "_"));
@@ -57,6 +75,8 @@ pub fn run_gpu_recovery(
         &session_name,
         &temp_dir,
     )?;
+
+    log::info!("hashcat 参数: {:?}", hashcat_args.args);
 
     let task_id = config.task_id.clone();
     let device_count = hashcat_info.devices.len() as u64;
@@ -76,6 +96,11 @@ pub fn run_gpu_recovery(
             let _ = app_handle_for_progress.emit("recovery-progress", progress);
         },
     );
+
+    match &result {
+        Ok(ref res) => log::info!("hashcat 结束: task={} result={:?}", task_id, res),
+        Err(ref err) => log::error!("hashcat 失败: task={} error={}", task_id, err),
+    }
 
     cleanup_temp_dir(&temp_dir, &hashcat_args.temp_files);
 

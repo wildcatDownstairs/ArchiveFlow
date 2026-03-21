@@ -39,6 +39,8 @@ pub fn run_hashcat(
     let mut last_speed = 0.0_f64;
     let mut last_worker_count = 0_u64;
 
+    log::info!("启动 hashcat: {:?} args={:?}", hashcat_path, args);
+
     let mut child = build_command(hashcat_path)
         .args(args)
         .stdout(Stdio::piped())
@@ -46,6 +48,8 @@ pub fn run_hashcat(
         .stdin(Stdio::null())
         .spawn()
         .map_err(|error| format!("启动 hashcat 失败: {}", error))?;
+
+    log::info!("hashcat 进程已启动: pid={}", child.id());
 
     let stdout = child.stdout.take().ok_or("无法读取 hashcat stdout")?;
     let stderr = child.stderr.take().ok_or("无法读取 hashcat stderr")?;
@@ -108,6 +112,15 @@ pub fn run_hashcat(
         .wait()
         .map_err(|error| format!("等待 hashcat 进程结束失败: {}", error))?;
     let stderr_output = stderr_handle.join().unwrap_or_default();
+
+    log::info!(
+        "hashcat 进程退出: code={:?} stderr_len={}",
+        exit_status.code(),
+        stderr_output.len()
+    );
+    if !stderr_output.is_empty() {
+        log::debug!("hashcat stderr: {}", stderr_output.trim());
+    }
 
     match exit_status.code().unwrap_or(-1) {
         0 => {

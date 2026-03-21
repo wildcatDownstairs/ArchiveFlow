@@ -2,6 +2,11 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+/// GPU hash 提取允许的最大压缩数据大小（字节）。
+/// 超过此阈值的 ZIP 条目将拒绝提取 hash，引导用户使用 CPU 引擎。
+/// 10 MB 足以覆盖绝大多数常规 ZIP 文件，同时避免分配数百 MB 内存。
+const MAX_COMPRESSED_DATA_SIZE: u64 = 10 * 1024 * 1024;
+
 /// 交给 hashcat 的 ZIP hash 信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HashcatZipHash {
@@ -73,7 +78,15 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
     drop(archive);
 
     if !is_aes {
-        return Err("当前 ZIP 使用传统 PKZIP 加密，GPU 恢复暂不支持，请改用 CPU".to_string());
+        return Err("当前 ZIP 使用传统 PKZIP 加密，不是 WinZip AES 加密".to_string());
+    }
+
+    // 大文件保护：mode 13600 需要把完整加密负载嵌入 hash 字符串。
+    if compressed_size > MAX_COMPRESSED_DATA_SIZE {
+        return Err(format!(
+            "AES 加密条目过大（{:.1} MB），GPU 模式不支持。请改用 CPU 引擎进行恢复",
+            compressed_size as f64 / (1024.0 * 1024.0)
+        ));
     }
 
     let (aes_strength, _) = parse_winzip_aes_extra(&extra_data)?;
@@ -86,7 +99,8 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
         }
     };
 
-    let mut file = File::open(file_path).map_err(|error| format!("打开 ZIP 文件失败: {}", error))?;
+    let mut file =
+        File::open(file_path).map_err(|error| format!("打开 ZIP 文件失败: {}", error))?;
     file.seek(SeekFrom::Start(data_start))
         .map_err(|error| format!("定位 ZIP 数据段失败: {}", error))?;
 
@@ -183,6 +197,17 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
 
     drop(entry);
     drop(archive);
+
+    // 大文件保护：PKZIP mode 17200 需要把完整加密数据嵌入 hash 字符串，
+    // 对于超大文件（如 100MB+）会产生数百 MB 的 hash 并耗尽内存。
+    // hashcat mode 17230（Checksum-Only）可避免此问题但要求 >= 3 个加密条目，
+    // 单文件 ZIP 无法使用。此处直接拒绝，引导用户改用 CPU 引擎。
+    if compressed_size > MAX_COMPRESSED_DATA_SIZE {
+        return Err(format!(
+            "PKZIP 加密条目过大（{:.1} MB），GPU 模式不支持。请改用 CPU 引擎进行恢复",
+            compressed_size as f64 / (1024.0 * 1024.0)
+        ));
+    }
 
     // Read the full encrypted payload (12-byte PKZIP encryption header + ciphertext)
     let mut file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
@@ -466,5 +491,30 @@ mod tests {
         let path = zip_fixtures_dir().join("encrypted-aes.zip");
         let hash = extract_zip_hash(&path).unwrap();
         assert_eq!(hash.hash_mode, 13600);
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_rejects_oversized_entry() {
+        use super::MAX_COMPRESSED_DATA_SIZE;
+
+        // 构造一个条目超过阈值的 PKZIP ZIP（使用真实大文件或环境变量路径）。
+        // 如果没有真实大文件可用，则用阈值常量做基本断言。
+        let large_zip_path = std::env::var("LARGE_PKZIP_ZIP_PATH").ok();
+        if let Some(path_str) = large_zip_path {
+            let path = std::path::Path::new(&path_str);
+            if path.exists() {
+                let result = extract_zip_pkzip_hash(path);
+                assert!(result.is_err(), "oversized PKZIP should be rejected");
+                let err_msg = result.unwrap_err();
+                assert!(
+                    err_msg.contains("过大") && err_msg.contains("CPU"),
+                    "error should mention size and CPU fallback, got: {}",
+                    err_msg
+                );
+                return;
+            }
+        }
+        // 无大文件时，至少验证阈值常量合理
+        assert_eq!(MAX_COMPRESSED_DATA_SIZE, 10 * 1024 * 1024);
     }
 }

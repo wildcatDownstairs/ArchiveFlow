@@ -1,12 +1,13 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
-use tauri::{command, AppHandle, Manager, State};
+use tauri::{command, AppHandle, Emitter, Manager, State};
 
 use crate::db::Database;
 use crate::domain::audit::AuditEventType;
 use crate::domain::recovery::{
     AttackMode, RecoveryBackend, RecoveryCheckpoint, RecoveryConfig, RecoveryManager,
-    RecoveryScheduler, RecoverySchedulerSnapshot, ScheduledRecovery, ScheduledRecoveryState,
+    RecoveryProgress, RecoveryScheduler, RecoverySchedulerSnapshot, RecoveryStatus,
+    ScheduledRecovery, ScheduledRecoveryState,
 };
 use crate::domain::task::{ArchiveType, TaskStatus};
 use crate::errors::AppError;
@@ -309,6 +310,23 @@ fn spawn_recovery_worker(
             }
             Err(err) => {
                 log::error!("恢复出错: {} - {}", task_id, err);
+                // 向前端发送终态进度事件，使 UI 从"运行中"切换到"错误"状态。
+                // 不发这个事件的话，前端只收到初始 0/0/0 Running 后不再更新，
+                // 用户会看到进度永远卡在 0% 且取消按钮无效。
+                let _ = app_handle.emit(
+                    "recovery-progress",
+                    RecoveryProgress {
+                        task_id: task_id.clone(),
+                        tried: 0,
+                        total: 0,
+                        speed: 0.0,
+                        status: RecoveryStatus::Error,
+                        found_password: None,
+                        elapsed_seconds: 0.0,
+                        worker_count: 0,
+                        last_checkpoint_at: None,
+                    },
+                );
                 let _ = scheduler.finish(&task_id);
                 let _ = db.update_task_recovery_result(
                     &task_id,
@@ -635,10 +653,10 @@ pub async fn cancel_recovery(
         log::info!("已发送取消信号: {}", task_id);
         Ok(())
     } else {
-        Err(AppError::InvalidArgument(format!(
-            "没有找到运行中的恢复任务: {}",
-            task_id
-        )))
+        // 任务已经结束（可能 hashcat 提前退出或出错），不再需要取消。
+        // 这里不报错，因为对用户来说"任务已经停了"等同于取消成功。
+        log::info!("取消信号未发送（任务已结束）: {}", task_id);
+        Ok(())
     }
 }
 
