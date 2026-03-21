@@ -677,36 +677,46 @@ const handleCopy = async (password: string) => {
       )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
-        <div className="rounded-lg border p-4 space-y-3">
-          <div className="text-sm font-medium">{t("recovery_insights")}</div>
-          <div className="grid gap-3 text-sm md:grid-cols-2">
-            <div>
-              <div className="text-xs text-muted-foreground">{t("current_stage")}</div>
-              <div className="font-medium">{t(stageKey)}</div>
+        <div className="rounded-lg border p-4 md:p-5 bg-card shadow-sm flex flex-col justify-center space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-primary" />
+              {t("recovery_insights")}
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-row md:flex-wrap md:items-center md:justify-between gap-6">
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground font-medium">{t("current_stage")}</div>
+              <div className="text-sm font-semibold">{t(stageKey)}</div>
+            </div>
+            
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground font-medium">
                 {backend === "gpu" ? t("gpu_device_count") : t("worker_count")}
               </div>
-              <div className="font-medium">
+              <div className="text-sm font-semibold">
                 {progress?.worker_count ? progress.worker_count.toLocaleString() : t("not_available")}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("current_parameters")}</div>
-              <div className="font-medium break-words">
+            
+            <div className="space-y-1.5 flex-1 min-w-[140px]">
+              <div className="text-xs text-muted-foreground font-medium">{t("current_parameters")}</div>
+              <div className="text-sm font-semibold break-words truncate">
                 {observedModeDescription ?? t("not_available")}
               </div>
             </div>
-            <div>
-              <div className="text-xs text-muted-foreground">{t("eta")}</div>
-              <div className="font-medium">
+            
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground font-medium">{t("eta")}</div>
+              <div className="text-sm font-semibold">
                 {etaSeconds !== null ? formatElapsed(etaSeconds) : t("not_available")}
               </div>
             </div>
-            <div className="md:col-span-2">
-              <div className="text-xs text-muted-foreground">{t("last_checkpoint")}</div>
-              <div className="font-medium">
+            
+            <div className="space-y-1.5 hidden lg:block">
+              <div className="text-xs text-muted-foreground font-medium">{t("last_checkpoint")}</div>
+              <div className="text-sm font-semibold text-muted-foreground">
                 {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : t("not_available")}
               </div>
             </div>
