@@ -18,4 +18,7 @@ pub use gpu_engine::run_gpu_recovery;
 pub use args::{build_attack_args, HashcatArgs};
 
 #[allow(unused_imports)]
+pub use runner::run_hashcat;
+
+#[allow(unused_imports)]
 pub use zip_aes_extract::{extract_zip_aes_hash, extract_zip_hash, HashcatZipHash};
