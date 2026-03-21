@@ -726,46 +726,73 @@ const handleCopy = async (password: string) => {
 
         <span className="text-muted-foreground text-xs select-none">·</span>
 
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <span
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+          title={t("current_stage")}
+        >
           <Layers className="h-3 w-3 flex-shrink-0" />
           <span className="text-foreground font-medium">{t(stageKey)}</span>
         </span>
 
-        <span className="text-muted-foreground text-xs select-none">·</span>
+        {progress?.worker_count != null && (
+          <>
+            <span className="text-muted-foreground text-xs select-none">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              title={backend === "gpu" ? t("gpu_device_count") : t("worker_count")}
+            >
+              {backend === "gpu" ? <Microchip className="h-3 w-3 flex-shrink-0" /> : <Cpu className="h-3 w-3 flex-shrink-0" />}
+              <span className="text-foreground font-medium">
+                {progress.worker_count.toLocaleString()}
+              </span>
+            </span>
+          </>
+        )}
 
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          {backend === "gpu" ? <Microchip className="h-3 w-3 flex-shrink-0" /> : <Cpu className="h-3 w-3 flex-shrink-0" />}
-          <span className="text-foreground font-medium">
-            {progress?.worker_count ? progress.worker_count.toLocaleString() : "—"}
-          </span>
-        </span>
+        {observedModeDescription != null && (
+          <>
+            <span className="text-muted-foreground text-xs select-none">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              title={t("current_parameters")}
+            >
+              <Hash className="h-3 w-3 flex-shrink-0" />
+              <span className="text-foreground font-medium font-mono truncate max-w-[140px]" title={observedModeDescription}>
+                {observedModeDescription}
+              </span>
+            </span>
+          </>
+        )}
 
-        <span className="text-muted-foreground text-xs select-none">·</span>
+        {etaSeconds !== null && (
+          <>
+            <span className="text-muted-foreground text-xs select-none">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              title={t("eta")}
+            >
+              <Timer className="h-3 w-3 flex-shrink-0" />
+              <span className="text-foreground font-medium">
+                {formatElapsed(etaSeconds)}
+              </span>
+            </span>
+          </>
+        )}
 
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <Hash className="h-3 w-3 flex-shrink-0" />
-          <span className="text-foreground font-medium font-mono truncate max-w-[140px]" title={observedModeDescription ?? undefined}>
-            {observedModeDescription ?? "—"}
-          </span>
-        </span>
-
-        <span className="text-muted-foreground text-xs select-none">·</span>
-
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <Timer className="h-3 w-3 flex-shrink-0" />
-          <span className="text-foreground font-medium">
-            {etaSeconds !== null ? formatElapsed(etaSeconds) : "—"}
-          </span>
-        </span>
-
-        <span className="text-muted-foreground text-xs select-none">·</span>
-
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <Bookmark className="h-3 w-3 flex-shrink-0" />
-          <span className="text-foreground font-medium">
-            {lastCheckpointAt ? formatDateTime(lastCheckpointAt) : "—"}
-          </span>
-        </span>
+        {lastCheckpointAt != null && (
+          <>
+            <span className="text-muted-foreground text-xs select-none">·</span>
+            <span
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+              title={t("last_checkpoint")}
+            >
+              <Bookmark className="h-3 w-3 flex-shrink-0" />
+              <span className="text-foreground font-medium">
+                {formatDateTime(lastCheckpointAt)}
+              </span>
+            </span>
+          </>
+        )}
       </div>
 
       {/* 结果展示 - 如果找到密码 */}
