@@ -57,6 +57,17 @@ export function formatElapsed(seconds: number): string {
 }
 
 /**
+ * 将每秒密码尝试数格式化为易读的缩写形式。
+ * 例如: 118845703 → "118.8M", 1500 → "1,500", 2300000000 → "2.30G"
+ */
+export function formatSpeed(speed: number): string {
+  if (speed >= 1e9) return `${(speed / 1e9).toFixed(2)}G`
+  if (speed >= 1e6) return `${(speed / 1e6).toFixed(1)}M`
+  if (speed >= 1e3) return speed.toLocaleString("en-US", { maximumFractionDigits: 0 })
+  return speed.toFixed(0)
+}
+
+/**
  *
  * @param format
  * @param fileName

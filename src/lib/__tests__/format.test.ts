@@ -6,7 +6,7 @@
  * @dependencies 无
  */
 
-import { formatFileSize, formatDateTime, getFileNameFromPath, formatElapsed } from "../format"
+import { formatFileSize, formatDateTime, getFileNameFromPath, formatElapsed, formatSpeed } from "../format"
 
 describe("formatFileSize", () => {
   it("returns '0 B' for 0 bytes", () => {
@@ -93,5 +93,35 @@ describe("formatElapsed", () => {
 
   it("formats 3661 seconds as '61m 1s'", () => {
     expect(formatElapsed(3661)).toBe("61m 1s")
+  })
+})
+
+describe("formatSpeed", () => {
+  it("formats 0 as '0'", () => {
+    expect(formatSpeed(0)).toBe("0")
+  })
+
+  it("formats 500 as '500'", () => {
+    expect(formatSpeed(500)).toBe("500")
+  })
+
+  it("formats 1500 with thousands separator", () => {
+    expect(formatSpeed(1500)).toBe("1,500")
+  })
+
+  it("formats 999999 with thousands separator", () => {
+    expect(formatSpeed(999999)).toBe("999,999")
+  })
+
+  it("formats 1000000 as '1.0M'", () => {
+    expect(formatSpeed(1000000)).toBe("1.0M")
+  })
+
+  it("formats 118845703 as '118.8M'", () => {
+    expect(formatSpeed(118845703)).toBe("118.8M")
+  })
+
+  it("formats 2300000000 as '2.30G'", () => {
+    expect(formatSpeed(2300000000)).toBe("2.30G")
   })
 })

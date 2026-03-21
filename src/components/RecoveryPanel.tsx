@@ -19,11 +19,12 @@ import {
   BookOpen,
   AlertCircle,
   FileUp,
+  Loader2,
 } from "lucide-react"
 import { open } from "@tauri-apps/plugin-dialog"
 import { readTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
-import { formatDateTime, formatElapsed } from "@/lib/format"
+import { formatDateTime, formatElapsed, formatSpeed } from "@/lib/format"
 import {
   describeObservedMode,
   estimateEtaSeconds,
@@ -115,6 +116,7 @@ export default function RecoveryPanel({
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
+  const [isStarting, setIsStarting] = useState(false)
   const [priority, setPriority] = useState(recoveryPreferences.defaultTaskPriority)
   const [backend, setBackend] = useState<RecoveryBackend>("cpu")
   const [error, setError] = useState<string | null>(null)
@@ -312,6 +314,8 @@ export default function RecoveryPanel({
  * @returns {any} 默认返回
  */
   const handleStart = async () => {
+    if (isStarting) return
+    setIsStarting(true)
     setError(null)
     setProgress(null)
 
@@ -409,6 +413,8 @@ export default function RecoveryPanel({
       void refreshAuditEvents()
     } catch (e) {
       setError(String(e))
+    } finally {
+      setIsStarting(false)
     }
   }
 
@@ -491,6 +497,8 @@ const handleCopy = async (password: string) => {
     scheduledRecovery !== null && !hasTerminalProgress
   const showSchedulerCard = hasBlockingScheduledRecovery
   const showRunningProgress = isRunning && progress?.status === "running"
+  const isInitializing =
+    showRunningProgress && progress !== null && progress.speed === 0 && progress.tried === 0
   const showCancelButton =
     isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
   const supportsGpuBackend = task.archive_type === "zip"
@@ -677,7 +685,9 @@ const handleCopy = async (password: string) => {
               <div className="font-medium">{t(stageKey)}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">{t("worker_count")}</div>
+              <div className="text-xs text-muted-foreground">
+                {backend === "gpu" ? t("gpu_device_count") : t("worker_count")}
+              </div>
               <div className="font-medium">
                 {progress?.worker_count ? progress.worker_count.toLocaleString() : t("not_available")}
               </div>
@@ -805,56 +815,74 @@ const handleCopy = async (password: string) => {
         <div className="rounded-lg border p-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="font-medium text-indigo-600">
-              {t("recovery_running")}
+              {isInitializing ? t("gpu_initializing") : t("recovery_running")}
             </span>
             <span className="text-muted-foreground">
-              {progressPercent.toFixed(1)}%
+              {isInitializing ? "" : `${progressPercent.toFixed(1)}%`}
             </span>
           </div>
 
-          {/* 进度条 */}
-          <div className="h-2.5 rounded-full bg-gray-200 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
+          {/* 进度条：初始化阶段用脉冲动画，正常阶段用实际进度 */}
+          {isInitializing ? (
+            <div className="h-2.5 rounded-full bg-gray-200 overflow-hidden">
+              <div className="h-full w-full rounded-full bg-gradient-to-r from-indigo-400 via-indigo-500 to-indigo-400 animate-pulse" />
+            </div>
+          ) : (
+            <div className="h-2.5 rounded-full bg-gray-200 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+          )}
+
+          {/* 初始化阶段提示文字 */}
+          {isInitializing && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {t("gpu_initializing_hint")}
+            </p>
+          )}
 
           {/* 统计数据 */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">{t("tried_count")}</span>
-              <p className="font-mono font-medium">
-                {progress.tried.toLocaleString()}
-              </p>
+          {!isInitializing && (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+              <div>
+                <span className="text-muted-foreground">{t("tried_count")}</span>
+                <p className="font-mono font-medium">
+                  {progress.tried.toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">{t("total_count")}</span>
+                <p className="font-mono font-medium">
+                  {progress.total.toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">{t("speed")}</span>
+                <p className="font-mono font-medium">
+                  {formatSpeed(progress.speed)} {t("passwords_per_sec")}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">
+                  {t("elapsed_time")}
+                </span>
+                <p className="font-mono font-medium">
+                  {formatElapsed(progress.elapsed_seconds)}
+                </p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">
+                  {backend === "gpu" ? t("gpu_device_count") : t("worker_count")}
+                </span>
+                <p className="font-mono font-medium">
+                  {progress.worker_count.toLocaleString()}
+                </p>
+              </div>
             </div>
-            <div>
-              <span className="text-muted-foreground">{t("total_count")}</span>
-              <p className="font-mono font-medium">
-                {progress.total.toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t("speed")}</span>
-              <p className="font-mono font-medium">
-                {progress.speed.toFixed(0)} {t("passwords_per_sec")}
-              </p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">
-                {t("elapsed_time")}
-              </span>
-              <p className="font-mono font-medium">
-                {formatElapsed(progress.elapsed_seconds)}
-              </p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t("worker_count")}</span>
-              <p className="font-mono font-medium">
-                {progress.worker_count.toLocaleString()}
-              </p>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1170,10 +1198,20 @@ const handleCopy = async (password: string) => {
           {/* 操作按钮 */}
           <button
             onClick={() => void handleStart()}
-            className="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            disabled={isStarting}
+            className={cn(
+              "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
+              isStarting
+                ? "bg-indigo-400 cursor-not-allowed text-indigo-100"
+                : "bg-indigo-600 text-white hover:bg-indigo-700",
+            )}
           >
-            <Play className="h-4 w-4" />
-            {t("start_recovery")}
+            {isStarting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            {isStarting ? t("starting") : t("start_recovery")}
           </button>
         </div>
       )}
