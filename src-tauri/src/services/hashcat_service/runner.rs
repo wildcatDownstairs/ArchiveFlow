@@ -153,11 +153,7 @@ pub fn run_hashcat(
             });
             Ok(RecoveryResult::Cancelled)
         }
-        code => Err(format!(
-            "hashcat 退出码 {}: {}",
-            code,
-            stderr_output.trim()
-        )),
+        code => Err(format!("hashcat 退出码 {}: {}", code, stderr_output.trim())),
     }
 }
 
@@ -188,23 +184,14 @@ fn build_command(hashcat_path: &Path) -> Command {
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    let mut command = Command::new(hashcat_path);
-    // hashcat 会从自己的工作目录里加载 OpenCL kernel 和模块文件。
-    // 如果直接在应用当前目录启动，就可能出现 `./OpenCL/` 找不到的错误。
-    if let Some(parent) = hashcat_path.parent() {
-        command.current_dir(parent);
-    }
+    let mut command = super::build_hashcat_command(hashcat_path);
     command.creation_flags(CREATE_NO_WINDOW);
     command
 }
 
 #[cfg(not(windows))]
 fn build_command(hashcat_path: &Path) -> Command {
-    let mut command = Command::new(hashcat_path);
-    if let Some(parent) = hashcat_path.parent() {
-        command.current_dir(parent);
-    }
-    command
+    super::build_hashcat_command(hashcat_path)
 }
 
 #[cfg(test)]
@@ -222,9 +209,18 @@ mod tests {
 
     #[test]
     fn map_status_uses_existing_recovery_statuses() {
-        assert_eq!(map_status(3), crate::domain::recovery::RecoveryStatus::Running);
-        assert_eq!(map_status(5), crate::domain::recovery::RecoveryStatus::Exhausted);
-        assert_eq!(map_status(6), crate::domain::recovery::RecoveryStatus::Found);
+        assert_eq!(
+            map_status(3),
+            crate::domain::recovery::RecoveryStatus::Running
+        );
+        assert_eq!(
+            map_status(5),
+            crate::domain::recovery::RecoveryStatus::Exhausted
+        );
+        assert_eq!(
+            map_status(6),
+            crate::domain::recovery::RecoveryStatus::Found
+        );
     }
 
     #[test]

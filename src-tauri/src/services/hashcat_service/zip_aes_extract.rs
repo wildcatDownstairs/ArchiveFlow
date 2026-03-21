@@ -56,7 +56,8 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
         }
     };
 
-    let mut file = File::open(file_path).map_err(|error| format!("打开 ZIP 文件失败: {}", error))?;
+    let mut file =
+        File::open(file_path).map_err(|error| format!("打开 ZIP 文件失败: {}", error))?;
     file.seek(SeekFrom::Start(data_start))
         .map_err(|error| format!("定位 ZIP 数据段失败: {}", error))?;
 
@@ -127,6 +128,12 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{extract_zip_aes_hash, parse_winzip_aes_extra};
+    use crate::domain::recovery::AttackMode;
+    use crate::services::hashcat_service::{build_attack_args, run_hashcat};
+    use crate::services::recovery_service::RecoveryResult;
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
 
     fn zip_fixtures_dir() -> std::path::PathBuf {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -165,6 +172,56 @@ mod tests {
         let result = extract_zip_aes_hash(&path);
         if let Err(message) = result {
             assert!(message.contains("PKZIP") || message.contains("extra field"));
+        }
+    }
+
+    /// 这是一个“真机集成测试”：
+    ///   - 读取真实 ZIP AES fixture
+    ///   - 提取 mode 13600 hash
+    ///   - 调本机 hashcat 去跑一个很小的字典
+    ///
+    /// 之所以默认 ignore，是因为 CI 和大多数开发机都不一定装了 hashcat。
+    /// 需要手工验证时，可以这样运行：
+    ///   HASHCAT_PATH=... cargo test ... -- --ignored hashcat_can_crack_extracted_zip_aes_fixture
+    #[test]
+    #[ignore = "requires local hashcat binary"]
+    fn hashcat_can_crack_extracted_zip_aes_fixture() {
+        if !cfg!(windows) {
+            return;
+        }
+
+        let hashcat_path = match std::env::var("HASHCAT_PATH") {
+            Ok(path) => path,
+            Err(_) => return,
+        };
+
+        let zip_path = zip_fixtures_dir().join("encrypted-aes.zip");
+        let hash = extract_zip_aes_hash(&zip_path).unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let args = build_attack_args(
+            &AttackMode::Dictionary {
+                wordlist: vec!["wrong".to_string(), "test123".to_string()],
+            },
+            hash.hash_mode,
+            &hash.hash_string,
+            "zip_aes_fixture",
+            temp_dir.path(),
+        )
+        .unwrap();
+
+        let result = run_hashcat(
+            Path::new(&hashcat_path),
+            &args.args,
+            &args.outfile_path,
+            "zip-aes-fixture",
+            Arc::new(AtomicBool::new(false)),
+            |_| {},
+        )
+        .unwrap();
+
+        match result {
+            RecoveryResult::Found(password) => assert_eq!(password, "test123"),
+            other => panic!("expected hashcat to find password, got {:?}", other),
         }
     }
 }

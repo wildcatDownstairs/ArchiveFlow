@@ -3,6 +3,8 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
+use super::build_hashcat_command;
+
 /// hashcat 检测结果：供设置页直接展示“是否可用、路径、版本、设备列表”。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashcatDetectionResult {
@@ -41,12 +43,7 @@ impl HashcatInfo {
 pub fn detect_hashcat(custom_path: Option<&Path>) -> Result<HashcatInfo, String> {
     let path = match custom_path {
         Some(path) if path.exists() => path.to_path_buf(),
-        Some(path) => {
-            return Err(format!(
-                "指定的 hashcat 路径不存在: {}",
-                path.display()
-            ))
-        }
+        Some(path) => return Err(format!("指定的 hashcat 路径不存在: {}", path.display())),
         None => find_hashcat_in_path()?,
     };
 
@@ -81,7 +78,11 @@ pub fn detect_hashcat_for_ui(custom_path: Option<&Path>) -> HashcatDetectionResu
 
 fn find_hashcat_in_path() -> Result<PathBuf, String> {
     let command = if cfg!(windows) { "where" } else { "which" };
-    let executable = if cfg!(windows) { "hashcat.exe" } else { "hashcat" };
+    let executable = if cfg!(windows) {
+        "hashcat.exe"
+    } else {
+        "hashcat"
+    };
     let output = Command::new(command)
         .arg(executable)
         .output()
@@ -174,20 +175,11 @@ fn parse_device_id(line: &str) -> Option<u32> {
     let trimmed = line
         .strip_prefix("Backend Device ID #")
         .or_else(|| line.strip_prefix("Device ID #"))?;
-    let digits: String = trimmed.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    let digits: String = trimmed
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
     digits.parse().ok()
-}
-
-/// hashcat 的 OpenCL / modules 目录默认按“当前工作目录”解析。
-/// 因此这里总是把进程工作目录切到 hashcat.exe 所在目录，
-/// 否则用户即使提供了正确的 exe 路径，也可能因为 cwd 不对而报
-/// `./OpenCL/: No such file or directory`。
-fn build_hashcat_command(path: &Path) -> Command {
-    let mut command = Command::new(path);
-    if let Some(parent) = path.parent() {
-        command.current_dir(parent);
-    }
-    command
 }
 
 #[cfg(test)]

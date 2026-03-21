@@ -24,7 +24,7 @@ use super::workers::{
 
 const PROGRESS_INTERVAL_MS: u64 = 500;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RecoveryResult {
     Found(String),
     Exhausted,

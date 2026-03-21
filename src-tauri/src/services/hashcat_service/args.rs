@@ -29,6 +29,7 @@ pub fn build_attack_args(
         "--session".to_string(),
         session_name.to_string(),
         "--potfile-disable".to_string(),
+        "--restore-disable".to_string(),
         "--outfile-format".to_string(),
         "2".to_string(),
         "-o".to_string(),
@@ -170,9 +171,6 @@ mod tests {
         .unwrap();
 
         assert!(args.args.iter().any(|arg| arg == "?1?1?1?1"));
-        assert!(args
-            .args
-            .iter()
-            .any(|arg| arg == "--increment-max=4"));
+        assert!(args.args.iter().any(|arg| arg == "--increment-max=4"));
     }
 }
