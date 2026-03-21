@@ -10,6 +10,9 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:ui": "vitest run src/components/__tests__ src/pages/__tests__",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:all": "npm run test:run && npm run test:ui && npm run lint && npm run build && npm run test:rust",
     "bench:recovery": "cargo test --release --manifest-path src-tauri/Cargo.toml recovery_baseline_benchmarks_print_report -- --ignored --nocapture",
     "tauri": "tauri"
   },

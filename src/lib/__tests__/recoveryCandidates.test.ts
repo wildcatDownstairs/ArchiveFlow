@@ -51,4 +51,28 @@ describe("buildDictionaryCandidates", () => {
     expect(candidates).toContain("alphabeta")
     expect(new Set(candidates).size).toBe(candidates.length)
   })
+
+  it("can add filename seeds and common suffixes for task-specific candidates", () => {
+    const candidates = buildDictionaryCandidates(
+      ["secret"],
+      "project_launch-plan.zip",
+      {
+        uppercase: false,
+        capitalize: false,
+        leetspeak: false,
+        reverse: false,
+        duplicate: false,
+        yearPatterns: false,
+        separatorPatterns: false,
+        commonSuffixes: true,
+        combineWords: false,
+        includeFilenamePatterns: true,
+      },
+    )
+
+    expect(candidates).toContain("secret123")
+    expect(candidates).toContain("project")
+    expect(candidates).toContain("launch")
+    expect(candidates).toContain("plan")
+  })
 })
