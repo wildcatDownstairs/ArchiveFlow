@@ -223,7 +223,7 @@ const handleExport = async (format: ExportFormat) => {
   const canExportTask = EXPORTABLE_STATUSES.includes(task.status)
 
   return (
-    <div className="p-6 h-full flex flex-col space-y-6">
+    <div className="p-6 space-y-6">
       {/* 导航 */}
       <div className="flex items-center justify-between">
         <button
@@ -379,9 +379,9 @@ const handleExport = async (format: ExportFormat) => {
 
       {/* 文件树 */}
       {info && info.entries.length > 0 && (
-        <section className="flex flex-col min-h-0 flex-1">
-          <h2 className="text-lg font-semibold mb-3 flex-shrink-0">{t("archive_contents")}</h2>
-          <div className="rounded-lg border p-4 overflow-y-auto flex-1 bg-card">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">{t("archive_contents")}</h2>
+          <div className="max-h-[26rem] rounded-lg border bg-card p-4 overflow-y-auto">
             {fileTree.map((node) => (
               <FileTreeNode key={node.path} node={node} t={t} />
             ))}
@@ -391,7 +391,7 @@ const handleExport = async (format: ExportFormat) => {
 
       {/* 密码恢复面板 - 仅在有加密文件时显示 */}
       {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
-        <div className="flex-shrink-0">
+        <div>
           <RecoveryPanel
             task={task}
             onTaskStatusChange={handleRecoveryStatusChange}

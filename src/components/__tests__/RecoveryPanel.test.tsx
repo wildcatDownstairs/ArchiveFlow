@@ -23,6 +23,7 @@ vi.mock("@/services/api", () => ({
   getTaskAuditEvents: vi.fn(),
   setRecoverySchedulerLimit: vi.fn(),
   startRecovery: vi.fn(),
+  detectHashcat: vi.fn(),
   cancelRecovery: vi.fn(),
   pauseRecovery: vi.fn(),
   resumeRecovery: vi.fn(),
@@ -120,6 +121,13 @@ describe("RecoveryPanel", () => {
     vi.mocked(api.setRecoverySchedulerLimit).mockResolvedValue(
       EMPTY_SCHEDULER_SNAPSHOT,
     )
+    vi.mocked(api.detectHashcat).mockResolvedValue({
+      available: true,
+      path: "C:/Tools/hashcat/hashcat.exe",
+      version: "v7.1.2",
+      devices: [{ id: 1, name: "NVIDIA GeForce RTX 4080", device_type: "GPU" }],
+      error: null,
+    })
     vi.mocked(api.onRecoveryProgress).mockImplementation(async (callback) => {
       progressListener = callback
       return () => {}
@@ -291,6 +299,43 @@ describe("RecoveryPanel", () => {
         2,
         "gpu",
         "C:/Tools/hashcat/hashcat.exe",
+      )
+    })
+  })
+
+  it("GPU 路径留空时会先自动探测 hashcat 再启动", async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.startRecovery).mockResolvedValue("running")
+    useAppStore.setState((state) => ({
+      ...state,
+      recoveryPreferences: {
+        ...state.recoveryPreferences,
+        hashcatPath: "",
+      },
+    }))
+    vi.mocked(api.detectHashcat).mockResolvedValue({
+      available: true,
+      path: "C:/Users/wildc/AppData/Local/ArchiveFlow/tools/hashcat/hashcat.exe",
+      version: "v7.1.2",
+      devices: [{ id: 1, name: "NVIDIA GeForce RTX 4080", device_type: "GPU" }],
+      error: null,
+    })
+
+    render(<RecoveryPanel task={READY_TASK} />)
+
+    await user.click(await screen.findByLabelText("外部 GPU (hashcat)"))
+    await user.click(screen.getByRole("button", { name: "暴力破解" }))
+    await user.click(screen.getByRole("button", { name: "开始恢复" }))
+
+    await waitFor(() => {
+      expect(api.detectHashcat).toHaveBeenCalledWith(undefined)
+      expect(api.startRecovery).toHaveBeenCalledWith(
+        READY_TASK.id,
+        "bruteforce",
+        expect.any(String),
+        2,
+        "gpu",
+        "C:/Users/wildc/AppData/Local/ArchiveFlow/tools/hashcat/hashcat.exe",
       )
     })
   })

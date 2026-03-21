@@ -74,6 +74,7 @@ export default function RecoveryPanel({
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
   const recoveryDrafts = useAppStore((state) => state.recoveryDrafts)
   const updateRecoveryDrafts = useAppStore((state) => state.updateRecoveryDrafts)
+  const updateRecoveryPreferences = useAppStore((state) => state.updateRecoveryPreferences)
 
   // 攻击模式
   const [activeTab, setActiveTab] = useState<AttackTab>("dictionary")
@@ -314,14 +315,22 @@ export default function RecoveryPanel({
     setError(null)
     setProgress(null)
 
-    // GPU 模式前置校验：未配置 hashcat 时直接给用户友好提示，
-    // 避免把后端的原始中文错误信息直接展示出来。
-    if (backend === "gpu" && !recoveryPreferences.hashcatPath?.trim()) {
-      setError(t("gpu_requires_hashcat"))
-      return
-    }
-
     try {
+      let resolvedHashcatPath = recoveryPreferences.hashcatPath?.trim() ?? ""
+      if (backend === "gpu") {
+        // GPU 启动前尽量自动发现 hashcat，避免用户明明已安装本地工具，
+        // 但因为设置页还没把路径预填进 store，就在这里被前端提前拦住。
+        const detection = await api.detectHashcat(resolvedHashcatPath || undefined)
+        if (!detection.available || !detection.path) {
+          setError(detection.error ?? t("gpu_requires_hashcat"))
+          return
+        }
+        resolvedHashcatPath = detection.path
+        if (resolvedHashcatPath !== recoveryPreferences.hashcatPath) {
+          updateRecoveryPreferences({ hashcatPath: resolvedHashcatPath })
+        }
+      }
+
       if (activeTab === "dictionary") {
         const lines = wordlistText
           .split("\n")
@@ -342,7 +351,7 @@ export default function RecoveryPanel({
           JSON.stringify({ wordlist: candidates }),
           priority,
           backend,
-          recoveryPreferences.hashcatPath,
+          resolvedHashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
@@ -373,7 +382,7 @@ export default function RecoveryPanel({
           }),
           priority,
           backend,
-          recoveryPreferences.hashcatPath,
+          resolvedHashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
@@ -390,7 +399,7 @@ export default function RecoveryPanel({
           }),
           priority,
           backend,
-          recoveryPreferences.hashcatPath,
+          resolvedHashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
