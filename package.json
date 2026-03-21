@@ -1,7 +1,7 @@
 {
   "name": "archiveflow",
   "private": true,
-  "version": "26.3.21+build.2",
+  "version": "26.2.33",
   "type": "module",
   "scripts": {
     "dev": "vite",
