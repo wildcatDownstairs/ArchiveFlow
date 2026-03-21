@@ -1,112 +1,73 @@
-# Capability Enhancement & Engineering Implementation Plan
+# Capability Enhancement & Engineering Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+**Date:** 2026-03-21  
+**Status:** Rolling  
+**Owner:** ArchiveFlow team
 
-**Goal:** Add result export, strategy expansion, settings enhancement, checkpoint/resume, benchmarks, task scheduler, UI observability, and test coverage.
+## Current State
 
-**Architecture:** Feature-by-feature implementation. Each feature touches Rust backend (commands/services/domain/db) + React frontend (api/types/i18n/pages/components). DB changes via migration v5.
+The following capability items are already implemented in the codebase:
 
-**Tech Stack:** Tauri 2, Rust, React 19, TypeScript 5.9, SQLite (rusqlite), Zustand, react-i18next, lucide-react
+- result export (`csv` / `json`) with audit logging
+- dictionary, brute-force, and mask recovery modes
+- dictionary-side transforms: uppercase, capitalize, leetspeak, reverse, duplicate, year patterns, separator combinations, filename-derived seeds
+- checkpoint persistence and resume after app restart
+- recovery scheduler with queue, pause, resume, priority, and concurrency limit
+- UI observability: ETA, worker count, latest checkpoint, recent audit events
+- settings for recovery defaults, export defaults, and retention policy
+- stable local benchmark entry via `npm run bench:recovery`
 
----
+## Remaining High-Value Gaps
 
-## Phase 1: Capability Enhancement
+### 1. Strategy Expansion
 
-### Task 1: Recovery Result Export
+Still worth adding:
 
-**Files:**
-- Create: `src-tauri/src/commands/export_commands.rs`
-- Modify: `src-tauri/src/commands/mod.rs`
-- Modify: `src-tauri/src/lib.rs` (register commands)
-- Modify: `src/services/api.ts` (add exportTaskResult, exportAllTasks)
-- Modify: `src/types/index.ts` (ExportFormat type)
-- Modify: `src/i18n/index.ts` (export-related keys)
-- Modify: `src/pages/TaskDetailPage.tsx` (export button)
-- Modify: `src/pages/TaskPage.tsx` (batch export button)
+- rule-file import for reusable transform chains
+- stronger combined-dictionary generation beyond pairwise UI toggles
+- common password template presets for practical recovery scenarios
 
-**Design:**
-- Backend: `export_tasks` command takes `task_ids: Vec<String>` and `format: "csv"|"json"`
-- Returns serialized string content
-- Frontend uses Tauri `save` dialog + `writeTextFile` to save
-- Emit `ResultExported` audit event (already defined in AuditEventType)
+### 2. Test Coverage
 
-### Task 2: Recovery Strategy Expansion — Mask Attack
+Current coverage is strong for Rust unit tests and frontend component tests, but still missing:
 
-**Files:**
-- Modify: `src-tauri/src/domain/recovery.rs` (add `MaskAttack` variant)
-- Modify: `src-tauri/src/services/recovery_service.rs` (mask iterator + shard support)
-- Modify: `src-tauri/src/commands/recovery_commands.rs` (parse mask mode)
-- Modify: `src/components/RecoveryPanel.tsx` (mask tab)
-- Modify: `src/i18n/index.ts` (mask-related keys)
+- fixture-driven end-to-end flows that exercise real Tauri commands
+- regression coverage for export option combinations
+- automated `tauri dev` UI flow tests
 
-**Design:**
-- `MaskAttack { pattern: String }` — pattern uses: `?l`=lowercase, `?u`=uppercase, `?d`=digit, `?s`=special, `?a`=all, literal chars
-- `MaskIterator` generates all combinations for the mask pattern
-- Total = product of each position's charset size
-- Supports sharding via `skip_to(n)` (mixed-radix)
+### 3. Performance Follow-up
 
-### Task 3: Settings Page Enhancement
+The baseline already shows where to look next:
 
-**Files:**
-- Modify: `src/pages/SettingsPage.tsx` (thread count, default presets)
-- Modify: `src/stores/appStore.ts` (add recovery settings)
-- Modify: `src/i18n/index.ts` (settings keys)
-- Modify: `src/components/RecoveryPanel.tsx` (read thread count from store)
-- Modify: `src-tauri/src/domain/recovery.rs` (add thread_count to RecoveryConfig)
-- Modify: `src-tauri/src/services/recovery_service.rs` (use config thread count)
-- Modify: `src-tauri/src/commands/recovery_commands.rs` (pass thread count)
+- checkpoint persistence remains materially slower than candidate generation
+- ZIP verification is a real hotspot
+- future work should compare ZIP / 7Z / RAR separately instead of treating them as one class
 
-**Design:**
-- Thread count: slider 1..num_cpus, default="auto" (num_cpus-1)
-- Persist to localStorage via Zustand
-- Pass as optional field in recovery start, backend uses it or falls back to auto
+### 4. Scheduler Engineering
 
-### Task 4: Recovery Checkpoint/Resume
+The queue exists, but deeper production behaviour is still open:
 
-**Files:**
-- Modify: `src-tauri/src/db/migrations.rs` (v5: add checkpoint columns)
-- Modify: `src-tauri/src/db/mod.rs` (save/load checkpoint methods)
-- Modify: `src-tauri/src/domain/recovery.rs` (CheckpointData struct)
-- Modify: `src-tauri/src/services/recovery_service.rs` (periodic checkpoint save + resume)
-- Modify: `src-tauri/src/commands/recovery_commands.rs` (resume_recovery command)
-- Modify: `src/services/api.ts` (resumeRecovery)
-- Modify: `src/components/RecoveryPanel.tsx` (resume button)
-- Modify: `src/i18n/index.ts`
+- retry policy for transient failures
+- fairness / starvation avoidance when priorities diverge
+- clearer task dependency hooks if future export or reporting jobs become scheduled work
 
-**Design:**
-- DB v5: `ALTER TABLE tasks ADD COLUMN checkpoint_data TEXT` (JSON: {tried, mode, config})
-- Save checkpoint every 5 seconds during recovery
-- `resume_recovery` command loads checkpoint, calls `shard_passwords` with offset
-- Frontend shows "Resume" button when task status is `cancelled` or `interrupted` and checkpoint_data exists
+## Recommended Execution Order
 
-## Phase 2: Performance & Engineering
+1. finish strategy expansion with reusable rule-file input
+2. add export-combination regression tests and fixture-driven integration coverage
+3. deepen benchmarks by archive type and attack mode
+4. extend scheduler behaviour with explicit retry/fairness rules
+5. add real Tauri end-to-end automation
 
-### Task 5: Benchmark & Profiling
+## Validation Standard
 
-**Files:**
-- Create: `src-tauri/benches/recovery_bench.rs`
-- Modify: `src-tauri/Cargo.toml` (add criterion dev-dependency + bench target)
+Each feature point should keep the existing release gate green:
 
-### Task 6: Task Scheduler (Sequential Queue)
+- `cargo test --manifest-path src-tauri/Cargo.toml`
+- `npm run test:run`
+- `npm run lint`
+- `npm run build`
 
-**Files:**
-- Modify: `src-tauri/src/domain/recovery.rs` (TaskQueue struct)
-- Create: `src-tauri/src/services/scheduler_service.rs`
-- Modify: `src-tauri/src/commands/recovery_commands.rs` (queue_recovery, get_queue)
-- Modify: `src/services/api.ts`
-- Modify: `src/components/RecoveryPanel.tsx`
+When benchmark-related code changes:
 
-### Task 7: UI Observability Enhancement
-
-**Files:**
-- Modify: `src-tauri/src/domain/recovery.rs` (add worker_count, eta to RecoveryProgress)
-- Modify: `src-tauri/src/services/recovery_service.rs` (compute ETA)
-- Modify: `src/types/index.ts`
-- Modify: `src/components/RecoveryPanel.tsx` (display ETA, worker count, peak speed)
-
-### Task 8: Test Coverage
-
-**Files:**
-- Create: `src-tauri/tests/` integration tests
-- Add unit tests to existing modules
-- Frontend component tests
+- `npm run bench:recovery`

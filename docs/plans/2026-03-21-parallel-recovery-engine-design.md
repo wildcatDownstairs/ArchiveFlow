@@ -6,17 +6,18 @@
 
 ## Problem
 
-The current recovery engine is single-threaded. On an i9-13900K (24 logical cores), it achieves ~232,512 passwords/s. An 8-digit numeric brute-force (100M candidates) takes ~7 minutes to exhaust. The CPU is almost entirely idle.
+The original recovery engine was single-threaded. On an i9-13900K (24 logical cores), it achieved ~232,512 passwords/s. An 8-digit numeric brute-force (100M candidates) took several minutes to exhaust, while most CPU capacity remained idle.
 
-**Goal:** Saturate all available CPU cores, targeting 15–20× throughput increase (≥3.5M p/s on i9-13900K).
+**Goal:** Saturate available CPU cores with a design that still keeps the Tauri UI responsive and works on both Intel hybrid CPUs and Apple Silicon.
 
 ## Chosen Approach: `std::thread::spawn` + upfront sharding (Option A)
 
 Split the candidate space into N shards upfront (N = `max(1, num_cpus::get() - 1)`), then run each shard in a dedicated `std::thread::spawn` worker with its own file handle and archive instance. Workers coordinate through `Arc<AtomicBool>`, `Arc<AtomicU64>`, and `mpsc::sync_channel`.
 
-**Why this over async runtimes or subprocesses:**
+**Why this over Rayon scopes, async runtimes, or subprocesses:**
 - CPU-bound workload — plain worker threads avoid async scheduling overhead and map directly to CPU cores
 - ZIP verification needs per-worker archive instances; explicit threads and join handles make lifecycle management straightforward
+- `ZipArchive` is not `Send`, so a Rayon-style shared parallel loop is a worse fit than explicit per-thread archive ownership
 - No process management or IPC complexity
 - Cross-platform (Windows + macOS M-series) via `num_cpus`
 
@@ -58,7 +59,7 @@ Each worker receives:
 | `tried_counter` | `Arc<AtomicU64>` | Global progress counter |
 | `result_sender` | `mpsc::SyncSender<String>` | Found password channel |
 
-Workers check `cancel_flag` every **1,000 iterations** (not every password) to minimize atomic overhead.
+Workers check `cancel_flag` in the worker loop while still keeping atomic traffic low enough for the hot path.
 
 ZIP: each worker calls `ZipArchive::new(File::open(&path)?)` — `ZipArchive` is not `Send`, so per-worker instances are required.  
 7Z / RAR: already stateless (each attempt opens the file independently).
@@ -107,7 +108,7 @@ run_recovery()
    - Worker panic aggregation is reported back to the caller
 3. **Criterion benchmark** (optional, `benches/recovery_bench.rs`): single-thread vs multi-thread throughput on test fixtures
 
-## Expected Performance
+## Expected Performance Envelope
 
 | Scenario | Single-thread | 23 workers (i9-13900K) |
 |---|---|---|
@@ -120,7 +121,7 @@ run_recovery()
 | File | Change |
 |---|---|
 | `Cargo.toml` | Add `num_cpus` dependency |
-| `src-tauri/src/services/recovery_service.rs` | Refactor `run_recovery()`, add `skip_to()` to `BruteForceIterator`, new worker functions |
+| `src-tauri/src/services/recovery_service/` | Refactor `run_recovery()`, add sharding/worker helpers, keep password validators per module |
 | `src-tauri/src/domain/recovery.rs` | Extend `RecoveryManager` if needed (cancel_flag already `Arc<AtomicBool>`) |
 
-No frontend changes required — progress events already use the same `RecoveryProgress` schema.
+Frontend changes were eventually required so the UI could surface worker count, ETA, and checkpoint metadata. The threading architecture, however, stayed entirely on the Rust side.
