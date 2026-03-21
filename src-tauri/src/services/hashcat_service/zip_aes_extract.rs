@@ -3,9 +3,11 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 /// GPU hash 提取允许的最大压缩数据大小（字节）。
-/// 超过此阈值的 ZIP 条目将拒绝提取 hash，引导用户使用 CPU 引擎。
-/// 10 MB 足以覆盖绝大多数常规 ZIP 文件，同时避免分配数百 MB 内存。
-const MAX_COMPRESSED_DATA_SIZE: u64 = 10 * 1024 * 1024;
+/// AES (mode 13600) 和 PKZIP (mode 17200) 都需要把完整加密负载嵌入 hash 字符串：
+///   - PKZIP: CRC32 校验必须解密全部密文
+///   - AES:   HMAC-SHA1 认证码覆盖整段密文，hashcat 需要重新计算
+/// 超过此阈值时引导用户使用 CPU 引擎（CPU 引擎逐块流式解密，不受内存限制）。
+const MAX_PKZIP_DATA_SIZE: u64 = 10 * 1024 * 1024;
 
 /// 交给 hashcat 的 ZIP hash 信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,10 +83,12 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
         return Err("当前 ZIP 使用传统 PKZIP 加密，不是 WinZip AES 加密".to_string());
     }
 
-    // 大文件保护：mode 13600 需要把完整加密负载嵌入 hash 字符串。
-    if compressed_size > MAX_COMPRESSED_DATA_SIZE {
+    // 大文件保护：mode 13600 ($zip2$) 验证时需要用完整加密负载重新计算
+    // HMAC-SHA1 认证码（auth code 覆盖整段密文，而非单独存储的摘要），
+    // 因此无法只读头尾跳过内容。对超大文件引导用户改用 CPU 引擎。
+    if compressed_size > MAX_PKZIP_DATA_SIZE {
         return Err(format!(
-            "AES 加密条目过大（{:.1} MB），GPU 模式不支持。请改用 CPU 引擎进行恢复",
+            "AES 加密条目过大（{:.1} MB），GPU 模式不支持（验证需嵌入完整密文）。请改用 CPU 引擎进行恢复",
             compressed_size as f64 / (1024.0 * 1024.0)
         ));
     }
@@ -198,13 +202,15 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     drop(entry);
     drop(archive);
 
-    // 大文件保护：PKZIP mode 17200 需要把完整加密数据嵌入 hash 字符串，
-    // 对于超大文件（如 100MB+）会产生数百 MB 的 hash 并耗尽内存。
-    // hashcat mode 17230（Checksum-Only）可避免此问题但要求 >= 3 个加密条目，
-    // 单文件 ZIP 无法使用。此处直接拒绝，引导用户改用 CPU 引擎。
-    if compressed_size > MAX_COMPRESSED_DATA_SIZE {
+    // 大文件保护：PKZIP mode 17200 必须把完整加密数据嵌入 hash 字符串，
+    // 因为 CRC32 校验需要解密全部密文——没有像 AES HMAC 那样独立存放于末尾
+    // 的认证标签，无法只读头尾跳过内容。对于超大文件（如 100MB+）会产生数百
+    // MB 的 hash 并耗尽内存。hashcat mode 17230（Checksum-Only）可绕过此限制，
+    // 但要求 >= 3 个加密条目，单文件 ZIP 无法使用。此处直接拒绝，引导用户
+    // 改用 CPU 引擎（CPU 引擎逐块解密，不需要把全部数据加载到内存中）。
+    if compressed_size > MAX_PKZIP_DATA_SIZE {
         return Err(format!(
-            "PKZIP 加密条目过大（{:.1} MB），GPU 模式不支持。请改用 CPU 引擎进行恢复",
+            "PKZIP 加密条目过大（{:.1} MB），GPU 模式不支持（需嵌入完整密文）。请改用 CPU 引擎进行恢复",
             compressed_size as f64 / (1024.0 * 1024.0)
         ));
     }
@@ -495,7 +501,7 @@ mod tests {
 
     #[test]
     fn extract_zip_pkzip_hash_rejects_oversized_entry() {
-        use super::MAX_COMPRESSED_DATA_SIZE;
+        use super::MAX_PKZIP_DATA_SIZE;
 
         // 构造一个条目超过阈值的 PKZIP ZIP（使用真实大文件或环境变量路径）。
         // 如果没有真实大文件可用，则用阈值常量做基本断言。
@@ -515,6 +521,6 @@ mod tests {
             }
         }
         // 无大文件时，至少验证阈值常量合理
-        assert_eq!(MAX_COMPRESSED_DATA_SIZE, 10 * 1024 * 1024);
+        assert_eq!(MAX_PKZIP_DATA_SIZE, 10 * 1024 * 1024);
     }
 }
