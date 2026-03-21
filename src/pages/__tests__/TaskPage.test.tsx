@@ -59,6 +59,7 @@ describe("TaskPage", () => {
         exportMaskPasswords: true,
         exportIncludeAuditEvents: false,
         maxConcurrentRecoveries: 1,
+        hashcatPath: "",
       },
     }))
 

@@ -61,6 +61,8 @@ describe("recoveryObservability", () => {
       task_id: "task-1",
       mode: { type: "dictionary", wordlist: ["secret"] },
       priority: 0,
+      backend: "cpu",
+      hashcat_path: null,
       state: "queued",
       requested_at: "2026-03-21T00:00:00Z",
       started_at: null,

@@ -10,6 +10,7 @@ vi.mock("@/services/api", () => ({
   getAppDataDir: vi.fn(),
   clearAllTasks: vi.fn(),
   clearAuditEvents: vi.fn(),
+  detectHashcat: vi.fn(),
   getStats: vi.fn(),
   recordSettingChange: vi.fn(),
   setRecoverySchedulerLimit: vi.fn(),
@@ -39,6 +40,7 @@ describe("SettingsPage", () => {
         exportMaskPasswords: false,
         exportIncludeAuditEvents: true,
         maxConcurrentRecoveries: 1,
+        hashcatPath: "",
       },
     }))
 
@@ -54,6 +56,13 @@ describe("SettingsPage", () => {
     })
     vi.mocked(api.clearAllTasks).mockResolvedValue(0)
     vi.mocked(api.clearAuditEvents).mockResolvedValue(0)
+    vi.mocked(api.detectHashcat).mockResolvedValue({
+      available: true,
+      path: "C:/Tools/hashcat/hashcat.exe",
+      version: "v7.0.0",
+      devices: [{ id: 1, name: "NVIDIA GeForce RTX 4080", device_type: "GPU" }],
+      error: null,
+    })
   })
 
   it("切换导出脱敏默认值时会更新 store 并记录审计", async () => {
@@ -73,5 +82,16 @@ describe("SettingsPage", () => {
       "false",
       "true",
     )
+  })
+
+  it("检测 hashcat 后会展示版本和设备信息", async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />)
+
+    await user.click(await screen.findByRole("button", { name: "检测 hashcat" }))
+
+    expect(await screen.findByText("已检测到可用的 hashcat GPU 环境")).toBeInTheDocument()
+    expect(screen.getByText(/v7\.0\.0/)).toBeInTheDocument()
+    expect(screen.getByText(/RTX 4080/)).toBeInTheDocument()
   })
 })

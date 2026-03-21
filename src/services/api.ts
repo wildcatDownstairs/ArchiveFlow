@@ -11,6 +11,8 @@ import type {
   RecoverySchedulerSnapshot,
   ScheduledRecovery,
   ScheduledRecoveryState,
+  RecoveryBackend,
+  HashcatDetectionResult,
 } from "@/types"
 
 export async function getTasks(): Promise<Task[]> {
@@ -64,12 +66,24 @@ export async function startRecovery(
   mode: "dictionary" | "bruteforce" | "mask",
   configJson: string,
   priority?: number,
+  backend?: RecoveryBackend,
+  hashcatPath?: string,
 ): Promise<ScheduledRecoveryState> {
   return invoke<ScheduledRecoveryState>("start_recovery", {
     taskId,
     mode,
     configJson,
     priority: priority ?? null,
+    backend: backend ?? "cpu",
+    hashcatPath: hashcatPath ?? null,
+  })
+}
+
+export async function detectHashcat(
+  customPath?: string,
+): Promise<HashcatDetectionResult> {
+  return invoke<HashcatDetectionResult>("detect_hashcat", {
+    customPath: customPath?.trim() ? customPath.trim() : null,
   })
 }
 

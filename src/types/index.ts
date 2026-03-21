@@ -102,6 +102,8 @@ export type AttackMode =
   | { type: "brute_force"; charset: string; min_length: number; max_length: number }
   | { type: "mask"; mask: string }
 
+export type RecoveryBackend = "cpu" | "gpu"
+
 export interface RecoveryCheckpoint {
   task_id: string
   mode: AttackMode
@@ -118,6 +120,8 @@ export interface ScheduledRecovery {
   task_id: string
   mode: AttackMode
   priority: number
+  backend: RecoveryBackend
+  hashcat_path: string | null
   state: ScheduledRecoveryState
   requested_at: string
   started_at: string | null
@@ -129,4 +133,18 @@ export interface RecoverySchedulerSnapshot {
   queued_count: number
   paused_count: number
   tasks: ScheduledRecovery[]
+}
+
+export interface HashcatDeviceInfo {
+  id: number
+  name: string
+  device_type: string
+}
+
+export interface HashcatDetectionResult {
+  available: boolean
+  path: string | null
+  version: string | null
+  devices: HashcatDeviceInfo[]
+  error: string | null
 }

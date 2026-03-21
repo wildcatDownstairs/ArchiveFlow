@@ -26,6 +26,7 @@ import { useAppStore } from "@/stores/appStore"
 import * as api from "@/services/api"
 import type {
   AuditEvent,
+  RecoveryBackend,
   RecoveryCheckpoint,
   RecoveryProgress,
   RecoverySchedulerSnapshot,
@@ -99,6 +100,7 @@ export default function RecoveryPanel({
     task.status === "processing",
   )
   const [priority, setPriority] = useState(recoveryPreferences.defaultTaskPriority)
+  const [backend, setBackend] = useState<RecoveryBackend>("cpu")
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -306,6 +308,8 @@ export default function RecoveryPanel({
           "dictionary",
           JSON.stringify({ wordlist: candidates }),
           priority,
+          backend,
+          recoveryPreferences.hashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
@@ -335,6 +339,8 @@ export default function RecoveryPanel({
             max_length: maxLength,
           }),
           priority,
+          backend,
+          recoveryPreferences.hashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
@@ -350,6 +356,8 @@ export default function RecoveryPanel({
             mask: maskPattern.trim(),
           }),
           priority,
+          backend,
+          recoveryPreferences.hashcatPath,
         )
         setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
@@ -426,6 +434,7 @@ export default function RecoveryPanel({
   const showRunningProgress = isRunning && progress?.status === "running"
   const showCancelButton =
     isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
+  const supportsGpuBackend = task.archive_type === "zip"
   const observedModeDescription = describeObservedMode(scheduledRecovery, checkpoint, t)
   const etaSeconds = estimateEtaSeconds(progress)
   const stageKey = getRecoveryStageKey(task, progress, scheduledRecovery)
@@ -541,7 +550,7 @@ export default function RecoveryPanel({
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              {scheduledRecovery.state !== "paused" && (
+              {scheduledRecovery.state !== "paused" && scheduledRecovery.backend === "cpu" && (
                 <button
                   onClick={() => void handlePause()}
                   className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
@@ -550,7 +559,12 @@ export default function RecoveryPanel({
                   {t("pause_recovery")}
                 </button>
               )}
-              {scheduledRecovery.state === "paused" && (
+              {scheduledRecovery.state !== "paused" && scheduledRecovery.backend === "gpu" && (
+                <span className="inline-flex items-center rounded-md border border-amber-300 px-3 py-2 text-xs text-amber-700">
+                  {t("recovery_backend_gpu_hint")}
+                </span>
+              )}
+              {scheduledRecovery.state === "paused" && scheduledRecovery.backend === "cpu" && (
                 <button
                   onClick={() => void handleResume()}
                   className="inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
@@ -1044,6 +1058,47 @@ export default function RecoveryPanel({
               />
             </div>
           )}
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">{t("recovery_backend")}</label>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="flex items-start gap-2 rounded-md border p-3 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name={`recovery-backend-${task.id}`}
+                  aria-label={t("recovery_backend_cpu")}
+                  checked={backend === "cpu"}
+                  onChange={() => setBackend("cpu")}
+                  className="mt-1 h-4 w-4 accent-primary"
+                />
+                <span className="space-y-1">
+                  <span className="block font-medium">{t("recovery_backend_cpu")}</span>
+                </span>
+              </label>
+              <label
+                className={cn(
+                  "flex items-start gap-2 rounded-md border p-3 text-sm",
+                  supportsGpuBackend ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+                )}
+              >
+                <input
+                  type="radio"
+                  name={`recovery-backend-${task.id}`}
+                  aria-label={t("recovery_backend_gpu")}
+                  checked={backend === "gpu"}
+                  onChange={() => setBackend("gpu")}
+                  disabled={!supportsGpuBackend}
+                  className="mt-1 h-4 w-4 accent-primary"
+                />
+                <span className="space-y-1">
+                  <span className="block font-medium">{t("recovery_backend_gpu")}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {t("recovery_backend_gpu_hint")}
+                  </span>
+                </span>
+              </label>
+            </div>
+          </div>
 
           {/* 错误提示 */}
           {error && (
