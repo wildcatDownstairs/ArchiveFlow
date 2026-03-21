@@ -284,158 +284,14 @@ const handleExport = async (format: ExportFormat) => {
         <FileArchive className="h-8 w-8 text-muted-foreground" />
         <div>
           <h1 className="text-2xl font-bold">{task.file_name}</h1>
-          <p className="text-sm text-muted-foreground truncate max-w-xl">
+          <p className="text-sm text-muted-foreground break-all">
             {task.file_path}
           </p>
         </div>
       </div>
 
-      {/* 综合信息条 */}
-      <div className="rounded-lg border bg-card shadow-sm p-4 md:p-5">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-row lg:flex-wrap lg:items-center lg:justify-between gap-6">
-          {/* 类型 */}
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-              <FileArchive className="h-3.5 w-3.5" />
-              {t("file_type")}
-            </p>
-            <div>
-              <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", TYPE_BADGE_COLORS[task.archive_type])}>
-                {t(`type_${task.archive_type}`)}
-              </span>
-            </div>
-          </div>
-
-          {/* 状态 */}
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-              <Zap className="h-3.5 w-3.5" />
-              {t("file_status")}
-            </p>
-            <div>
-              <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", STATUS_BADGE_COLORS[task.status])}>
-                {t(`status_${task.status}`)}
-              </span>
-            </div>
-          </div>
-
-          {/* 大小 */}
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-              <HardDrive className="h-3.5 w-3.5" />
-              {t("file_size")}
-            </p>
-            <p className="text-sm font-semibold">{formatFileSize(task.file_size)}</p>
-          </div>
-
-          {/* 加密状态 */}
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              {t("encryption")}
-            </p>
-            <div className="flex items-center">
-              {info ? (
-                info.is_encrypted ? (
-                  <span className="flex items-center gap-1 text-sm font-semibold text-amber-600 dark:text-amber-500">
-                    <ShieldAlert className="h-4 w-4" />
-                    {t("encrypted")}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-sm font-semibold text-green-600 dark:text-green-500">
-                    <ShieldCheck className="h-4 w-4" />
-                    {t("not_encrypted")}
-                  </span>
-                )
-              ) : (
-                <span className="text-sm font-semibold text-muted-foreground">-</span>
-              )}
-            </div>
-          </div>
-
-          {info && (
-            <>
-              {/* 大屏分割线 */}
-              <div className="hidden lg:block w-px h-8 bg-border mx-2"></div>
-
-              {/* 总文件数 */}
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-                  <Files className="h-3.5 w-3.5" />
-                  {t("total_entries")}
-                </p>
-                <p className="text-sm font-semibold">{info.total_entries}</p>
-              </div>
-
-              {/* 解压大小 */}
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-                  <HardDrive className="h-3.5 w-3.5" />
-                  {t("uncompressed_size")}
-                </p>
-                <p className="text-sm font-semibold">{formatFileSize(info.total_size)}</p>
-              </div>
-
-              {/* 加密文件数 */}
-              <div className="space-y-1.5">
-                <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
-                  <Lock className="h-3.5 w-3.5" />
-                  {t("encrypted_entries")}
-                </p>
-                <p className="text-sm font-semibold">
-                  <span className={info.entries.some((e) => e.is_encrypted) ? "text-amber-600 dark:text-amber-500" : ""}>
-                    {info.entries.filter((e) => e.is_encrypted).length}
-                  </span>
-                  <span className="text-muted-foreground font-normal ml-0.5">/ {info.entries.filter((e) => !e.is_directory).length}</span>
-                </p>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* 时间信息 */}
-      <div className="flex gap-6 text-sm text-muted-foreground">
-        <span>{t("created_at")}: {formatDateTime(task.created_at)}</span>
-        <span>{t("updated_at")}: {formatDateTime(task.updated_at)}</span>
-      </div>
-
-      {/* 错误信息 */}
-      {task.error_message && (
-        <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
-          {task.error_message}
-        </div>
-      )}
-
       {/* 主体内容：主区 + 右侧边栏 */}
       <div className="flex flex-col xl:flex-row gap-6 items-start">
-        {/* 左侧：文件树 */}
-        {info && info.entries.length > 0 && (
-          <div className="flex flex-col gap-6 flex-1 min-w-0">
-            <section className="space-y-3">
-              <button 
-                onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
-                className="flex items-center gap-2 text-lg font-semibold hover:text-indigo-600 transition-colors focus:outline-none"
-              >
-                {isFileTreeExpanded ? (
-                  <ChevronDown className="h-5 w-5" />
-                ) : (
-                  <ChevronRight className="h-5 w-5" />
-                )}
-                {t("archive_contents")}
-              </button>
-              
-              {isFileTreeExpanded && (
-                <div className="max-h-[calc(100vh-24rem)] rounded-lg border bg-card p-4 overflow-y-auto">
-                  {fileTree.map((node) => (
-                    <FileTreeNode key={node.path} node={node} t={t} />
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
-        )}
-
         {/* 右侧：密码恢复面板 - 仅在有加密文件时显示 */}
         {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
           <div className="flex flex-col gap-6 flex-1 min-w-0">
@@ -445,6 +301,137 @@ const handleExport = async (format: ExportFormat) => {
             />
           </div>
         )}
+
+        {/* 右侧侧边栏：元信息 + 文件树 */}
+        <aside className="w-full xl:w-72 flex-shrink-0 flex flex-col gap-4">
+          {/* 元信息卡片 */}
+          <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-sm">
+              {/* 类型 */}
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <FileArchive className="h-3.5 w-3.5 flex-shrink-0" />
+                {t("file_type")}
+              </span>
+              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold w-fit", TYPE_BADGE_COLORS[task.archive_type])}>
+                {t(`type_${task.archive_type}`)}
+              </span>
+
+              {/* 状态 */}
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 flex-shrink-0" />
+                {t("file_status")}
+              </span>
+              <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold w-fit", STATUS_BADGE_COLORS[task.status])}>
+                {t(`status_${task.status}`)}
+              </span>
+
+              {/* 大小 */}
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <HardDrive className="h-3.5 w-3.5 flex-shrink-0" />
+                {t("file_size")}
+              </span>
+              <span className="font-medium">{formatFileSize(task.file_size)}</span>
+
+              {/* 加密状态 */}
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5 flex-shrink-0" />
+                {t("encryption")}
+              </span>
+              <span>
+                {info ? (
+                  info.is_encrypted ? (
+                    <span className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-500">
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      {t("encrypted")}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-500">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      {t("not_encrypted")}
+                    </span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
+              </span>
+
+              {info && (
+                <>
+                  {/* 总文件数 */}
+                  <span className="text-muted-foreground flex items-center gap-1.5">
+                    <Files className="h-3.5 w-3.5 flex-shrink-0" />
+                    {t("total_entries")}
+                  </span>
+                  <span className="font-medium">{info.total_entries}</span>
+
+                  {/* 解压大小 */}
+                  <span className="text-muted-foreground flex items-center gap-1.5">
+                    <HardDrive className="h-3.5 w-3.5 flex-shrink-0" />
+                    {t("uncompressed_size")}
+                  </span>
+                  <span className="font-medium">{formatFileSize(info.total_size)}</span>
+
+                  {/* 加密文件数 */}
+                  <span className="text-muted-foreground flex items-center gap-1.5">
+                    <Lock className="h-3.5 w-3.5 flex-shrink-0" />
+                    {t("encrypted_entries")}
+                  </span>
+                  <span className="font-medium">
+                    <span className={info.entries.some((e) => e.is_encrypted) ? "text-amber-600 dark:text-amber-500" : ""}>
+                      {info.entries.filter((e) => e.is_encrypted).length}
+                    </span>
+                    <span className="text-muted-foreground font-normal">
+                      {" / "}{info.entries.filter((e) => !e.is_directory).length}
+                    </span>
+                  </span>
+                </>
+              )}
+            </div>
+
+            {/* 分割线 + 时间信息 */}
+            <div className="border-t pt-3 space-y-1.5 text-xs text-muted-foreground">
+              <div className="flex justify-between gap-2">
+                <span>{t("created_at")}</span>
+                <span className="text-right font-medium text-foreground">{formatDateTime(task.created_at)}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span>{t("updated_at")}</span>
+                <span className="text-right font-medium text-foreground">{formatDateTime(task.updated_at)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 错误信息 */}
+          {task.error_message && (
+            <div className="rounded-md bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
+              {task.error_message}
+            </div>
+          )}
+
+          {/* 归档内容（可折叠，仅在有条目时显示） */}
+          {info && info.entries.length > 0 && (
+            <section className="space-y-2">
+              <button
+                onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
+                className="flex items-center gap-2 text-sm font-semibold hover:text-indigo-600 transition-colors focus:outline-none w-full text-left"
+              >
+                {isFileTreeExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                {t("archive_contents")}
+              </button>
+              {isFileTreeExpanded && (
+                <div className="max-h-64 rounded-lg border bg-card p-3 overflow-y-auto">
+                  {fileTree.map((node) => (
+                    <FileTreeNode key={node.path} node={node} t={t} />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+        </aside>
       </div>
     </div>
   )
