@@ -1,10 +1,16 @@
 const COMMON_SUFFIXES = ["1", "12", "123", "1234", "2024", "2025", "2026", "!", "@123"]
+const YEAR_PATTERNS = ["2024", "2025", "2026", "24", "25", "26"]
+const COMBINATION_SEPARATORS = ["", "-", "_", "."]
 const MAX_GENERATED_CANDIDATES = 50_000
 
 export interface DictionaryGenerationOptions {
   uppercase: boolean
   capitalize: boolean
   leetspeak: boolean
+  reverse: boolean
+  duplicate: boolean
+  yearPatterns: boolean
+  separatorPatterns: boolean
   commonSuffixes: boolean
   combineWords: boolean
   includeFilenamePatterns: boolean
@@ -24,12 +30,26 @@ function leetspeakVariant(word: string): string {
     .replace(/s/gi, "$")
 }
 
+function reverseWord(word: string): string {
+  return word.split("").reverse().join("")
+}
+
 function filenameSeeds(fileName: string): string[] {
   const stem = fileName.replace(/\.[^.]+$/, "")
   return stem
     .split(/[^a-zA-Z0-9]+/)
     .map((part) => part.trim())
     .filter((part) => part.length >= 2)
+}
+
+function pushYearPatterns(
+  pushCandidate: (candidate: string) => void,
+  seed: string,
+) {
+  for (const year of YEAR_PATTERNS) {
+    pushCandidate(`${seed}${year}`)
+    pushCandidate(`${capitalizeWord(seed)}${year}`)
+  }
 }
 
 export function buildDictionaryCandidates(
@@ -59,6 +79,9 @@ export function buildDictionaryCandidates(
     if (options.uppercase) pushCandidate(seed.toUpperCase())
     if (options.capitalize) pushCandidate(capitalizeWord(seed))
     if (options.leetspeak) pushCandidate(leetspeakVariant(seed))
+    if (options.reverse) pushCandidate(reverseWord(seed))
+    if (options.duplicate) pushCandidate(`${seed}${seed}`)
+    if (options.yearPatterns) pushYearPatterns(pushCandidate, seed)
     if (options.commonSuffixes) {
       for (const suffix of COMMON_SUFFIXES) {
         pushCandidate(`${seed}${suffix}`)
@@ -71,7 +94,13 @@ export function buildDictionaryCandidates(
     for (let i = 0; i < combineSource.length; i += 1) {
       for (let j = 0; j < combineSource.length; j += 1) {
         if (i === j) continue
-        pushCandidate(`${combineSource[i]}${combineSource[j]}`)
+        if (options.separatorPatterns) {
+          for (const separator of COMBINATION_SEPARATORS) {
+            pushCandidate(`${combineSource[i]}${separator}${combineSource[j]}`)
+          }
+        } else {
+          pushCandidate(`${combineSource[i]}${combineSource[j]}`)
+        }
         if (result.length >= MAX_GENERATED_CANDIDATES) {
           return result
         }
