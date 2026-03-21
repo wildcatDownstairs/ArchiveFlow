@@ -110,10 +110,29 @@
   to   { opacity: 0; }
 }
 
+/* Low-frequency glitch burst for pending (not-yet-reached) boot steps.
+   Most of the cycle is calm; a brief disturbance fires around 15% and 16%. */
+@keyframes pending-glitch {
+  0%,  14%  { clip-path: none; transform: none; }
+  15%        { clip-path: inset(30% 0 55% 0); transform: translateX(-3px); }
+  15.5%      { clip-path: inset(70% 0 10% 0); transform: translateX(3px); }
+  16%        { clip-path: none; transform: none; }
+  100%       { clip-path: none; transform: none; }
+}
+
+/* Residual glitch on completed boot steps — smaller amplitude, fires around 25%. */
+@keyframes done-glitch {
+  0%,  24%  { clip-path: none; transform: none; }
+  25%        { clip-path: inset(20% 0 65% 0); transform: translateX(-2px); }
+  25.4%      { clip-path: inset(60% 0 15% 0); transform: translateX(2px); }
+  25.8%      { clip-path: none; transform: none; }
+  100%       { clip-path: none; transform: none; }
+}
+
 /* Disable motion-heavy animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .boot-glitch-layer { animation: none !important; }
-  .boot-cursor       { animation: none !important; opacity: 1 !important; }
-  .boot-scanlines    { animation: none !important; }
+  .boot-glitch-layer  { animation: none !important; }
+  .boot-cursor        { animation: none !important; opacity: 1 !important; }
+  .boot-scanlines     { animation: none !important; }
   .boot-progress-fill { animation: none !important; }
 }

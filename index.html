@@ -15,8 +15,10 @@
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
         font-family: 'Cascadia Code', 'Source Code Pro', ui-monospace, monospace;
+        opacity: 1;
+        transition: opacity 0.25s ease-out;
       }
-      #static-splash.hidden { display: none; }
+      #static-splash.hidden { opacity: 0; pointer-events: none; }
 
       /* CRT scanlines */
       .s-scan {
@@ -65,9 +67,10 @@
       .s-steps { margin-bottom: 1.75rem; display: flex; flex-direction: column; gap: 0.55rem; }
       .s-step {
         display: flex; align-items: center; gap: 0.6rem;
-        font-size: 0.95rem;
-        color: #445; opacity: 0.25;
-        animation: s-step-on 0.4s ease-out both;
+        font-size: 1.05rem; line-height: 1.6;
+        color: #8899aa; opacity: 0.55;
+        text-shadow: -1px 0 rgba(255,0,200,0.5), 1px 0 rgba(0,255,247,0.5);
+        animation: s-step-on 0.4s ease-out both, s-done-glitch 5.5s ease-in-out infinite;
       }
       .s-step .s-icon { width: 1.2rem; color: #00fff7; }
       .s-step .s-label { flex: 1; }
@@ -75,12 +78,12 @@
       .s-step .s-cursor { color: #00fff7; animation: s-blink 0.7s step-end infinite; }
 
       /* Step stagger: each step activates 1.5s apart */
-      .s-step:nth-child(1) { animation-delay: 0.3s; }
-      .s-step:nth-child(2) { animation-delay: 1.8s; }
-      .s-step:nth-child(3) { animation-delay: 3.3s; }
-      .s-step:nth-child(4) { animation-delay: 4.8s; }
-      .s-step:nth-child(5) { animation-delay: 6.3s; }
-      .s-step:nth-child(6) { animation-delay: 7.8s; }
+      .s-step:nth-child(1) { animation-delay: 0.3s,  0.0s; }
+      .s-step:nth-child(2) { animation-delay: 1.8s,  0.65s; }
+      .s-step:nth-child(3) { animation-delay: 3.3s,  1.30s; }
+      .s-step:nth-child(4) { animation-delay: 4.8s,  1.95s; }
+      .s-step:nth-child(5) { animation-delay: 6.3s,  2.60s; }
+      .s-step:nth-child(6) { animation-delay: 7.8s,  3.25s; }
 
       /* [OK] shows 1.2s after the step activates */
       .s-step:nth-child(1) .s-ok { animation-delay: 1.5s; }
@@ -91,7 +94,14 @@
       .s-step:nth-child(6) .s-ok { animation-delay: 9.0s; }
 
       @keyframes s-step-on {
-        to { opacity: 0.9; color: #00fff7; }
+        to { opacity: 0.9; color: #00fff7; text-shadow: -1px 0 rgba(255,0,200,0.4), 1px 0 rgba(0,255,247,0.4); }
+      }
+      @keyframes s-done-glitch {
+        0%,  24%  { clip-path: none; transform: none; }
+        25%        { clip-path: inset(20% 0 65% 0); transform: translateX(-2px); }
+        25.4%      { clip-path: inset(60% 0 15% 0); transform: translateX(2px); }
+        25.8%      { clip-path: none; transform: none; }
+        100%       { clip-path: none; transform: none; }
       }
       @keyframes s-ok-show {
         to { opacity: 1; }
@@ -104,8 +114,8 @@
       /* Progress bar */
       .s-bar-wrap { margin-bottom: 1rem; }
       .s-bar {
-        height: 3px; background: #0a0a0a; border-radius: 2px;
-        overflow: hidden; border: 1px solid #111;
+        height: 6px; background: #0a0a0a; border-radius: 3px;
+        overflow: hidden; border: 1px solid #1a1a1a;
       }
       .s-bar-fill {
         height: 100%; width: 0%; border-radius: 2px;

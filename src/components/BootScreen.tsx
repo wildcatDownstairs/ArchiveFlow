@@ -31,11 +31,13 @@ export default function BootScreen({ onComplete }: Props) {
     "boot_step_6",
   ] as const
 
-  // Remove the static HTML splash once React has mounted
+  // Hide the static HTML splash only after React has rendered its first active step,
+  // preventing a flash of the blank currentStep=0 state between the two screens.
   useEffect(() => {
+    if (currentStep < 1) return
     const splash = document.getElementById("static-splash")
     if (splash) splash.classList.add("hidden")
-  }, [])
+  }, [currentStep])
 
   useEffect(() => {
     if (ran.current) return
@@ -176,13 +178,22 @@ export default function BootScreen({ onComplete }: Props) {
                   display: "flex",
                   alignItems: "center",
                   gap: "0.6rem",
-                  fontSize: "0.95rem",
-                  opacity: isPending ? 0.25 : isDone ? 0.65 : 1,
+                  fontSize: "1.05rem",
+                  lineHeight: "1.6",
+                  opacity: isPending ? 0.55 : isDone ? 0.75 : 1,
                   transition: "opacity 0.3s",
-                  color: isDone ? "#6a7a7a" : isActive ? "#00fff7" : "#445",
+                  color: isDone ? "#38ccc4" : isActive ? "#00fff7" : "#8899aa",
+                  ...(isDone ? {
+                    textShadow: "-1px 0 rgba(255,0,200,0.4), 1px 0 rgba(0,255,247,0.4)",
+                    animation: "done-glitch 5.5s ease-in-out infinite",
+                    animationDelay: `${idx * 0.65}s`,
+                  } : isPending ? {
+                    textShadow: "-1px 0 rgba(255,0,200,0.5), 1px 0 rgba(0,255,247,0.5)",
+                    animation: "pending-glitch 7s ease-in-out infinite",
+                  } : {}),
                 }}
               >
-                <span style={{ color: isActive ? "#00fff7" : isDone ? "#4a5a5a" : "#2a2a2a", width: "1.2rem" }}>
+                <span style={{ color: isActive ? "#00fff7" : isDone ? "#28a89f" : "#667788", width: "1.2rem", lineHeight: "inherit" }}>
                   {isDone ? "✓" : isActive ? "›" : "·"}
                 </span>
                 <span style={{ flex: 1 }}>{t(key)}</span>
@@ -212,11 +223,11 @@ export default function BootScreen({ onComplete }: Props) {
         <div style={{ marginBottom: "1rem" }}>
           <div
             style={{
-              height: "3px",
+              height: "6px",
               backgroundColor: "#0a0a0a",
-              borderRadius: "2px",
+              borderRadius: "3px",
               overflow: "hidden",
-              border: "1px solid #111",
+              border: "1px solid #1a1a1a",
             }}
           >
             <div
