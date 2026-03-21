@@ -584,9 +584,44 @@ const handleCopy = async (password: string) => {
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center gap-2">
-        <KeyRound className="h-5 w-5 text-amber-500" />
-        <h2 className="text-lg font-semibold">{t("recovery")}</h2>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <KeyRound className="h-5 w-5 text-amber-500" />
+          <h2 className="text-lg font-semibold">{t("recovery")}</h2>
+        </div>
+        
+        {/* 操作按钮区 (原位于底部) */}
+        <div className="flex items-center gap-2">
+          {canStart && (
+            <button
+              onClick={() => void handleStart()}
+              disabled={isStarting}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
+                isStarting
+                  ? "bg-indigo-400 cursor-not-allowed text-indigo-100"
+                  : "bg-indigo-600 text-white hover:bg-indigo-700",
+              )}
+            >
+              {isStarting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+              {isStarting ? t("starting") : t("start_recovery")}
+            </button>
+          )}
+
+          {showCancelButton && (
+            <button
+              onClick={() => void handleCancel()}
+              className="flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
+            >
+              <Square className="h-4 w-4" />
+              {t("cancel_recovery")}
+            </button>
+          )}
+        </div>
       </div>
 
       <p className="text-sm text-muted-foreground">
@@ -1204,37 +1239,7 @@ const handleCopy = async (password: string) => {
               {error}
             </div>
           )}
-
-          {/* 操作按钮 */}
-          <button
-            onClick={() => void handleStart()}
-            disabled={isStarting}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition-colors",
-              isStarting
-                ? "bg-indigo-400 cursor-not-allowed text-indigo-100"
-                : "bg-indigo-600 text-white hover:bg-indigo-700",
-            )}
-          >
-            {isStarting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            {isStarting ? t("starting") : t("start_recovery")}
-          </button>
         </div>
-      )}
-
-      {/* 取消按钮 - 运行中 */}
-      {showCancelButton && (
-        <button
-          onClick={() => void handleCancel()}
-          className="flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
-        >
-          <Square className="h-4 w-4" />
-          {t("cancel_recovery")}
-        </button>
       )}
     </section>
   )

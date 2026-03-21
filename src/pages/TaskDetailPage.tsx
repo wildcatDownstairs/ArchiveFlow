@@ -23,6 +23,8 @@ import {
   ShieldAlert,
   Download,
   Zap,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react"
 import { save, ask } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
@@ -127,6 +129,7 @@ export default function TaskDetailPage() {
   const { currentTask, fetchTask, removeTask } = useTaskStore()
   const [loading, setLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isFileTreeExpanded, setIsFileTreeExpanded] = useState(true)
 
 
 
@@ -417,12 +420,25 @@ const handleExport = async (format: ExportFormat) => {
             )}
           >
             <section className="space-y-3">
-              <h2 className="text-lg font-semibold">{t("archive_contents")}</h2>
-              <div className="max-h-[calc(100vh-24rem)] min-h-[30rem] rounded-lg border bg-card p-4 overflow-y-auto">
-                {fileTree.map((node) => (
-                  <FileTreeNode key={node.path} node={node} t={t} />
-                ))}
-              </div>
+              <button 
+                onClick={() => setIsFileTreeExpanded(!isFileTreeExpanded)}
+                className="flex items-center gap-2 text-lg font-semibold hover:text-indigo-600 transition-colors focus:outline-none"
+              >
+                {isFileTreeExpanded ? (
+                  <ChevronDown className="h-5 w-5" />
+                ) : (
+                  <ChevronRight className="h-5 w-5" />
+                )}
+                {t("archive_contents")}
+              </button>
+              
+              {isFileTreeExpanded && (
+                <div className="max-h-[calc(100vh-24rem)] min-h-[30rem] rounded-lg border bg-card p-4 overflow-y-auto">
+                  {fileTree.map((node) => (
+                    <FileTreeNode key={node.path} node={node} t={t} />
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         )}
