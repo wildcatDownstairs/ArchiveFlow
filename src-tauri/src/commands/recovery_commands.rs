@@ -415,7 +415,7 @@ pub async fn start_recovery(
     if recovery_backend == RecoveryBackend::Gpu {
         if task.archive_type != ArchiveType::Zip {
             return Err(AppError::InvalidArgument(
-                "GPU 恢复当前仅支持 ZIP AES/WinZip，请改用 CPU".to_string(),
+                "GPU 恢复当前仅支持 ZIP（AES/WinZip 或 PKZIP/ZipCrypto），请改用 CPU".to_string(),
             ));
         }
 

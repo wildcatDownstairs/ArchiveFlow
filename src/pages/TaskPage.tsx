@@ -6,11 +6,11 @@
  * @dependencies react, react-router-dom, react-i18next, lucide-react, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
  */
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { Trash2, FileArchive, Loader2, Lock, Unlock, Download } from "lucide-react"
-import { save } from "@tauri-apps/plugin-dialog"
+import { save, ask } from "@tauri-apps/plugin-dialog"
 import { writeTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/stores/appStore"
@@ -54,6 +54,7 @@ export default function TaskPage() {
   const navigate = useNavigate()
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
   const { tasks, loading, fetchTasks, removeTask } = useTaskStore()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     void fetchTasks()
@@ -66,11 +67,15 @@ export default function TaskPage() {
    */
   const handleDelete = async (e: React.MouseEvent, taskId: string) => {
     e.stopPropagation()
-    if (!window.confirm(t("delete_confirm"))) return
+    const confirmed = await ask(t("delete_confirm"), { kind: "warning" })
+    if (!confirmed) return
+    setDeletingId(taskId)
     try {
       await removeTask(taskId)
     } catch (err) {
       console.error("Failed to delete task:", err)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -229,10 +234,15 @@ const handleExportAll = async (format: ExportFormat) => {
                   <td className="py-3">
                     <button
                       onClick={(e) => void handleDelete(e, task.id)}
-                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                      disabled={deletingId === task.id}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       title={t("delete")}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      {deletingId === task.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                       {t("delete")}
                     </button>
                   </td>

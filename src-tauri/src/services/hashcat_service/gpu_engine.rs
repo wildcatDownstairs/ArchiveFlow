@@ -33,7 +33,7 @@ pub fn run_gpu_recovery(
         return Err("GPU 恢复 V1 仅支持 Windows".to_string());
     }
     if archive_type != ArchiveType::Zip {
-        return Err("GPU 恢复当前仅支持 ZIP AES".to_string());
+        return Err("GPU 恢复当前仅支持 ZIP（AES 或 PKZIP）".to_string());
     }
 
     // GPU 不支持断点续跑，启动前清除旧的 CPU checkpoint，

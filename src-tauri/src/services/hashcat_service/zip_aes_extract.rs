@@ -135,9 +135,13 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
     })
 }
 
-/// 从传统 PKZIP 加密 ZIP 中提取 hashcat mode 17200 ($pkzip2$) hash。
+/// 从传统 PKZIP 加密 ZIP 中提取 hashcat $pkzip2$ hash。
 ///
-/// $pkzip2$ 格式 (single-file compressed):
+/// 根据压缩方式自动选择 hashcat mode：
+///   - mode 17200: PKZIP (Compressed)   — Deflate 等需要 inflate 验证的条目
+///   - mode 17210: PKZIP (Uncompressed) — Stored（method=0）条目，直接 CRC32 校验
+///
+/// $pkzip2$ 格式 (single-file):
 ///   $pkzip2$<N>*<chk>*<ctype>*<plain>*<clen>*<ulen>*<crc32>*<offset>*<addoff>*<method>*<dlen>*<crc16>*<crc_hi>*<data>*$/pkzip2$
 ///
 /// 字段说明：
@@ -232,6 +236,14 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     let ctype_flag: u32 = if compress_method == 0 { 0 } else { 2 };
     let method = compress_method as u32;
 
+    // 根据压缩方式选择 hashcat mode：
+    //   - mode 17200: PKZIP (Compressed)   — 解密后需要 inflate 再校验 CRC32
+    //   - mode 17210: PKZIP (Uncompressed) — 解密后直接校验 CRC32，不做 inflate
+    // 使用错误的 mode 会导致 hashcat 对正确密码的验证也失败（inflate 非压缩数据
+    // 必定报错），从而「穷尽候选」却找不到密码。常见于 Bandizip 等工具对
+    // JPEG/PNG 等已压缩格式使用 Stored 方式打包的场景。
+    let hash_mode: u32 = if compress_method == 0 { 17210 } else { 17200 };
+
     let clen_hex = format!("{:x}", compressed_size);
     let ulen_hex = format!("{:x}", uncompressed_size);
     let crc32_hex = format!("{:08x}", crc32);
@@ -256,7 +268,7 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     );
 
     Ok(HashcatZipHash {
-        hash_mode: 17200,
+        hash_mode,
         hash_string,
     })
 }
@@ -481,6 +493,74 @@ mod tests {
             result.is_err(),
             "AES zip should be rejected by PKZIP extractor"
         );
+    }
+
+    // ── Stored-compression PKZIP tests (mode 17210) ──────────────────
+
+    #[test]
+    fn extract_zip_pkzip_hash_returns_mode_17210_for_stored_fixture() {
+        let path = zip_fixtures_dir().join("encrypted-pkzip-stored.zip");
+        let hash = extract_zip_pkzip_hash(&path).unwrap();
+        assert_eq!(
+            hash.hash_mode, 17210,
+            "Stored (method=0) entries should use hashcat mode 17210, not 17200"
+        );
+        assert!(
+            hash.hash_string.starts_with("$pkzip2$"),
+            "hash_string should start with $pkzip2$, got: {}",
+            hash.hash_string
+        );
+        assert!(
+            hash.hash_string.ends_with("*$/pkzip2$"),
+            "hash_string should end with *$/pkzip2$, got: {}",
+            hash.hash_string
+        );
+    }
+
+    #[test]
+    fn extract_zip_pkzip_hash_stored_fixture_has_ctype_0() {
+        // Fixture: encrypted-pkzip-stored.zip
+        //   password: test123, compress_type=0 (Stored), CRC32: 0x0d4a1185
+        //   compressed_size: 23 (= 11 content + 12 PKZIP header)
+        let path = zip_fixtures_dir().join("encrypted-pkzip-stored.zip");
+        let hash = extract_zip_pkzip_hash(&path).unwrap();
+        let s = &hash.hash_string;
+
+        // ctype field should be 0 (stored), not 2 (compressed)
+        // Format: $pkzip2$1*1*{ctype}*0*...
+        assert!(
+            s.starts_with("$pkzip2$1*1*0*"),
+            "Stored entry should have ctype=0 in hash, got: {}",
+            s
+        );
+
+        // Method field should be 0 (Stored)
+        // CRC32 should match
+        assert!(
+            s.contains("0d4a1185"),
+            "hash must contain crc32=0d4a1185, got: {}",
+            s
+        );
+    }
+
+    #[test]
+    fn extract_zip_hash_dispatches_to_17210_for_stored_fixture() {
+        use super::extract_zip_hash;
+        let path = zip_fixtures_dir().join("encrypted-pkzip-stored.zip");
+        let hash = extract_zip_hash(&path).unwrap();
+        assert_eq!(
+            hash.hash_mode, 17210,
+            "extract_zip_hash should dispatch Stored PKZIP to mode 17210"
+        );
+    }
+
+    /// 与 Deflate PKZIP 测试对称——验证 Stored PKZIP 的 hashcat 全链路。
+    #[test]
+    #[ignore = "requires local hashcat binary"]
+    fn hashcat_can_crack_extracted_zip_pkzip_stored_fixture() {
+        let zip_path = zip_fixtures_dir().join("encrypted-pkzip-stored.zip");
+        let hash = extract_zip_pkzip_hash(&zip_path).unwrap();
+        crack_fixture_with_local_hashcat(hash, "zip_pkzip_stored_fixture");
     }
 
     #[test]
