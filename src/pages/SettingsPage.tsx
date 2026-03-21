@@ -18,10 +18,12 @@ import {
   getAppDataDir,
   clearAllTasks,
   clearAuditEvents,
+  detectHashcat,
   getStats,
   recordSettingChange,
   setRecoverySchedulerLimit,
 } from "@/services/api"
+import type { HashcatDetectionResult } from "@/types"
 
 function stringifySetting(value: unknown): string {
   if (typeof value === "string") return value
@@ -38,6 +40,9 @@ export default function SettingsPage() {
   const [taskCount, setTaskCount] = useState(0)
   const [auditCount, setAuditCount] = useState(0)
   const [confirmAction, setConfirmAction] = useState<"tasks" | "audit" | null>(null)
+  const [hashcatPathInput, setHashcatPathInput] = useState(recoveryPreferences.hashcatPath)
+  const [hashcatStatus, setHashcatStatus] = useState<HashcatDetectionResult | null>(null)
+  const [hashcatChecking, setHashcatChecking] = useState(false)
 
   const loadStats = async () => {
     try {
@@ -158,6 +163,40 @@ export default function SettingsPage() {
       recoveryPreferences.maxConcurrentRecoveries,
       normalized,
     )
+  }
+
+  const handleHashcatPathCommit = async () => {
+    const normalized = hashcatPathInput.trim()
+    if (recoveryPreferences.hashcatPath === normalized) {
+      setHashcatPathInput(normalized)
+      return
+    }
+
+    updateRecoveryPreferences({ hashcatPath: normalized })
+    setHashcatPathInput(normalized)
+    await persistSettingChange("recovery.hashcatPath", recoveryPreferences.hashcatPath, normalized)
+  }
+
+  const handleDetectHashcat = async () => {
+    setHashcatChecking(true)
+    try {
+      const result = await detectHashcat(hashcatPathInput)
+      setHashcatStatus(result)
+      if (result.path && result.path !== recoveryPreferences.hashcatPath) {
+        updateRecoveryPreferences({ hashcatPath: result.path })
+        setHashcatPathInput(result.path)
+      }
+    } catch (error) {
+      setHashcatStatus({
+        available: false,
+        path: hashcatPathInput || null,
+        version: null,
+        devices: [],
+        error: String(error),
+      })
+    } finally {
+      setHashcatChecking(false)
+    }
   }
 
   const handleClearTasks = async () => {
@@ -300,6 +339,64 @@ export default function SettingsPage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <p className="text-xs text-muted-foreground">{t("default_task_priority_hint")}</p>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-dashed p-4">
+            <div className="space-y-1">
+              <label className="text-sm font-medium">{t("hashcat_path")}</label>
+              <input
+                type="text"
+                value={hashcatPathInput}
+                placeholder={t("hashcat_path_placeholder")}
+                onChange={(e) => {
+                  setHashcatPathInput(e.target.value)
+                }}
+                onBlur={() => void handleHashcatPathCommit()}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-xs text-muted-foreground">{t("hashcat_path_hint")}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleDetectHashcat()}
+                disabled={hashcatChecking}
+                className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {hashcatChecking ? t("loading") : t("detect_hashcat")}
+              </button>
+              {hashcatStatus?.version && (
+                <span className="text-sm text-muted-foreground">
+                  {t("version")}: {hashcatStatus.version}
+                </span>
+              )}
+            </div>
+            {hashcatStatus && (
+              <div className="space-y-2 text-sm">
+                <div className={hashcatStatus.available ? "text-green-600" : "text-amber-600"}>
+                  {hashcatStatus.available
+                    ? t("hashcat_detected")
+                    : hashcatStatus.error ?? t("hashcat_not_detected")}
+                </div>
+                {hashcatStatus.path && (
+                  <div className="text-xs text-muted-foreground font-mono break-all">
+                    {hashcatStatus.path}
+                  </div>
+                )}
+                {hashcatStatus.devices.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">{t("hashcat_devices")}</div>
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {hashcatStatus.devices.map((device) => (
+                        <li key={`${device.id}-${device.name}`}>
+                          #{device.id} {device.name} ({device.device_type})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 text-sm">

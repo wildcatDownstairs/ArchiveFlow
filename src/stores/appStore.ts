@@ -24,6 +24,7 @@ export interface RecoveryPreferences {
   exportMaskPasswords: boolean
   exportIncludeAuditEvents: boolean
   maxConcurrentRecoveries: number
+  hashcatPath: string
 }
 
 export interface RecoveryDrafts {
@@ -47,6 +48,7 @@ const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
   exportMaskPasswords: false,
   exportIncludeAuditEvents: true,
   maxConcurrentRecoveries: 1,
+  hashcatPath: "",
 }
 
 const DEFAULT_RECOVERY_DRAFTS: RecoveryDrafts = {

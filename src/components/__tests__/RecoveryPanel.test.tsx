@@ -59,6 +59,8 @@ const STALE_QUEUED_RECOVERY: ScheduledRecovery = {
   task_id: RUNNING_TASK.id,
   mode: { type: "dictionary", wordlist: ["alpha"] },
   priority: 2,
+  backend: "cpu",
+  hashcat_path: null,
   state: "queued",
   requested_at: "2026-03-21T00:00:00Z",
   started_at: null,
@@ -90,6 +92,7 @@ describe("RecoveryPanel", () => {
         exportMaskPasswords: false,
         exportIncludeAuditEvents: true,
         maxConcurrentRecoveries: 1,
+        hashcatPath: "C:/Tools/hashcat/hashcat.exe",
       },
       recoveryDrafts: {
         dictionaryText: "",
@@ -224,5 +227,27 @@ describe("RecoveryPanel", () => {
     expect(await screen.findByText("已穷尽所有候选密码")).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "暴力破解" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "开始恢复" })).toBeInTheDocument()
+  })
+
+  it("选择 GPU 后端时会把后端和 hashcat 路径传给启动命令", async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.startRecovery).mockResolvedValue("running")
+
+    render(<RecoveryPanel task={READY_TASK} />)
+
+    await user.click(await screen.findByLabelText("外部 GPU (hashcat)"))
+    await user.click(screen.getByRole("button", { name: "暴力破解" }))
+    await user.click(screen.getByRole("button", { name: "开始恢复" }))
+
+    await waitFor(() => {
+      expect(api.startRecovery).toHaveBeenCalledWith(
+        READY_TASK.id,
+        "bruteforce",
+        expect.any(String),
+        2,
+        "gpu",
+        "C:/Tools/hashcat/hashcat.exe",
+      )
+    })
   })
 })
