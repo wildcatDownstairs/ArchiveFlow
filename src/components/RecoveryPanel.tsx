@@ -598,28 +598,8 @@ const handleCopy = async (password: string) => {
           <h2 className="text-lg font-semibold">{t("recovery")}</h2>
         </div>
         
-        {/* 操作按钮区 (原位于底部) */}
+        {/* 操作按钮区 */}
         <div className="flex items-center gap-2">
-          {canStart && (
-            <button
-              onClick={() => void handleStart()}
-              disabled={isStarting}
-              className={cn(
-                "flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
-                isStarting
-                  ? "bg-indigo-400 cursor-not-allowed text-indigo-100"
-                  : "bg-indigo-600 text-white hover:bg-indigo-700",
-              )}
-            >
-              {isStarting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-              {isStarting ? t("starting") : t("start_recovery")}
-            </button>
-          )}
-
           {showCancelButton && (
             <button
               onClick={() => void handleCancel()}
@@ -951,169 +931,207 @@ const handleCopy = async (password: string) => {
 
       {/* 配置面板 - 非运行状态且可以开始 */}
       {canStart && (
-        <div className="rounded-lg border p-4 space-y-4">
-          {/* 模式选择 Tab */}
-          <div className="flex border-b">
+        <div className="space-y-3">
+          {/* 模式选择 Tab - pill 风格 */}
+          <div className="flex gap-1 bg-muted/40 rounded-xl p-1.5 mb-7">
             <button
               onClick={() => setActiveTab("dictionary")}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] text-sm font-medium transition-colors",
                 activeTab === "dictionary"
-                  ? "border-indigo-500 text-indigo-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
             >
-              <BookOpen className="h-4 w-4" />
+              <BookOpen className="h-4 w-4 flex-shrink-0" />
               {t("dictionary_attack")}
             </button>
             <button
               onClick={() => setActiveTab("bruteforce")}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] text-sm font-medium transition-colors",
                 activeTab === "bruteforce"
-                  ? "border-indigo-500 text-indigo-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
             >
-              <Zap className="h-4 w-4" />
+              <Zap className="h-4 w-4 flex-shrink-0" />
               {t("bruteforce_attack")}
             </button>
             <button
               onClick={() => setActiveTab("mask")}
               className={cn(
-                "flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors",
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-[10px] text-sm font-medium transition-colors",
                 activeTab === "mask"
-                  ? "border-indigo-500 text-indigo-600"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
             >
-              <KeyRound className="h-4 w-4" />
+              <KeyRound className="h-4 w-4 flex-shrink-0" />
               {t("mask_attack")}
             </button>
           </div>
 
           {/* 字典模式 */}
           {activeTab === "dictionary" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <label className="text-sm text-muted-foreground">
-                  {t("dictionary_hint")}
-                </label>
-                <button
-                  onClick={() => void handleImportDictionaryFile()}
-                  className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs hover:bg-muted"
-                >
-                  <FileUp className="h-3.5 w-3.5" />
-                  {t("import_dictionary_file")}
-                </button>
+            <div className="space-y-3">
+              {/* 字典输入区 */}
+              <div className="bg-muted/30 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="inline-flex items-center gap-1.5 bg-muted/50 rounded-full px-3 py-1 text-xs text-muted-foreground">
+                    <FileUp className="h-[11px] w-[11px]" />
+                    {wordlistText.split("\n").map((l) => l.trim()).filter(Boolean).length}{" "}
+                    {t("items")}
+                  </span>
+                  <button
+                    onClick={() => void handleImportDictionaryFile()}
+                    className="inline-flex items-center gap-1.5 bg-muted/50 rounded-lg px-3.5 py-1.5 text-xs text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+                  >
+                    <FileUp className="h-3 w-3" />
+                    {t("import_dictionary_file")}
+                  </button>
+                </div>
+                <textarea
+                  value={wordlistText}
+                  onChange={(e) => {
+                    const nextText = e.target.value
+                    setWordlistText(nextText)
+                    updateRecoveryDrafts({ dictionaryText: nextText })
+                  }}
+                  placeholder={t("dictionary_placeholder")}
+                  rows={6}
+                  className="w-full bg-muted/50 rounded-xl px-4 py-4 text-sm font-mono resize-y min-h-[140px] outline-none focus:bg-muted/70 placeholder:text-muted-foreground/50 transition-colors"
+                />
+                {recoveryDrafts.dictionarySourceName && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    {recoveryDrafts.dictionarySourceName}
+                  </p>
+                )}
               </div>
-              <label className="text-sm text-muted-foreground">
-                {t("dictionary_generation_hint")}
-              </label>
-              <textarea
-                value={wordlistText}
-                onChange={(e) => {
-                  const nextText = e.target.value
-                  setWordlistText(nextText)
-                  updateRecoveryDrafts({
-                    dictionaryText: nextText,
-                  })
-                }}
-                placeholder={t("dictionary_placeholder")}
-                rows={6}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              {recoveryDrafts.dictionarySourceName && (
-                <p className="text-xs text-muted-foreground">
-                  {recoveryDrafts.dictionarySourceName}
-                </p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                {
-                  wordlistText
-                    .split("\n")
-                    .map((l) => l.trim())
-                    .filter(Boolean).length
-                }{" "}
-                {t("items")}
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                {(
-                  [
-                    ["capitalize", t("transform_capitalize")],
-                    ["uppercase", t("transform_uppercase")],
-                    ["leetspeak", t("transform_leetspeak")],
-                    ["reverse", t("transform_reverse")],
-                    ["duplicate", t("transform_duplicate")],
-                    ["yearPatterns", t("transform_year_patterns")],
-                    ["separatorPatterns", t("transform_separator_patterns"), !dictionaryOptions.combineWords] as const,
-                    ["commonSuffixes", t("transform_common_suffixes")],
-                    ["combineWords", t("combine_dictionary")],
-                    ["includeFilenamePatterns", t("include_filename_patterns")],
-                  ] as const
-                ).map(([key, label, disabled]) => (
-                  <label key={key} className={cn("flex items-center gap-2", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}>
-                    <input
-                      type="checkbox"
-                      checked={dictionaryOptions[key]}
-                      disabled={!!disabled}
-                      onChange={(e) =>
-                        setDictionaryOptions((prev) => ({
-                          ...prev,
-                          [key]: e.target.checked,
-                        }))
-                      }
-                      className="rounded border-gray-300"
-                    />
-                    {label}
-                  </label>
-                ))}
+
+              {/* 变体生成 */}
+              <div className="bg-muted/30 rounded-2xl p-6">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+                  {t("dictionary_generation_hint")}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {(
+                    [
+                      ["capitalize", t("transform_capitalize")],
+                      ["uppercase", t("transform_uppercase")],
+                      ["leetspeak", t("transform_leetspeak")],
+                      ["reverse", t("transform_reverse")],
+                      ["duplicate", t("transform_duplicate")],
+                      ["yearPatterns", t("transform_year_patterns")],
+                      ["separatorPatterns", t("transform_separator_patterns"), !dictionaryOptions.combineWords] as const,
+                      ["commonSuffixes", t("transform_common_suffixes")],
+                      ["combineWords", t("combine_dictionary")],
+                      ["includeFilenamePatterns", t("include_filename_patterns")],
+                    ] as const
+                  ).map(([key, label, disabled]) => (
+                    <label
+                      key={key}
+                      className={cn(
+                        "flex items-center gap-2.5 px-3.5 py-2.5 rounded-[10px] select-none transition-colors",
+                        disabled
+                          ? "cursor-not-allowed opacity-40"
+                          : "cursor-pointer hover:bg-muted/50",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={dictionaryOptions[key]}
+                        disabled={!!disabled}
+                        onChange={(e) =>
+                          setDictionaryOptions((prev) => ({ ...prev, [key]: e.target.checked }))
+                        }
+                        className="sr-only"
+                      />
+                      {/* 自定义 checkbox */}
+                      <span
+                        className={cn(
+                          "w-[18px] h-[18px] rounded-[5px] flex-shrink-0 flex items-center justify-center transition-colors",
+                          dictionaryOptions[key] && !disabled
+                            ? "bg-primary"
+                            : "bg-muted/70",
+                        )}
+                      >
+                        {dictionaryOptions[key] && !disabled && (
+                          <svg width="9" height="6" viewBox="0 0 9 6" fill="none">
+                            <path d="M1 3L3.5 5.5L8 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </span>
+                      <span className={cn(
+                        "text-sm",
+                        dictionaryOptions[key] ? "text-foreground" : "text-muted-foreground",
+                      )}>
+                        {label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
           {/* 暴力破解模式 */}
           {activeTab === "bruteforce" && (
-            <div className="space-y-4">
-              {/* 字符集选择 */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t("charset")}</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(
-                    [
-                      "lowercase",
-                      "uppercase",
-                      "digits",
-                      "special",
-                    ] as const
-                  ).map((key) => (
-                    <label
-                      key={key}
-                      className="flex items-center gap-2 text-sm cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!useCustomCharset && charsetFlags[key]}
-                        onChange={(e) => {
-                          setUseCustomCharset(false)
-                          setCharsetFlags((prev) => ({
-                            ...prev,
-                            [key]: e.target.checked,
-                          }))
-                        }}
-                        className="rounded border-gray-300"
-                      />
-                      {t(`charset_${key}`)}
-                    </label>
-                  ))}
-                  <label className="flex items-center gap-2 text-sm cursor-pointer col-span-2">
+            <div className="space-y-3">
+              {/* 字符集 */}
+              <div className="bg-muted/30 rounded-2xl p-6">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+                  {t("charset")}
+                </div>
+                <div className="flex flex-wrap gap-2 mb-5">
+                  {(["lowercase", "uppercase", "digits", "special"] as const).map((key) => {
+                    const selected = !useCustomCharset && charsetFlags[key]
+                    return (
+                      <label
+                        key={key}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2.5 rounded-[10px] cursor-pointer select-none transition-colors",
+                          selected ? "bg-primary/10" : "bg-muted/50 hover:bg-muted/70",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(e) => {
+                            setUseCustomCharset(false)
+                            setCharsetFlags((prev) => ({ ...prev, [key]: e.target.checked }))
+                          }}
+                          className="sr-only"
+                        />
+                        <span className={cn(
+                          "w-2 h-2 rounded-full flex-shrink-0 transition-colors",
+                          selected ? "bg-primary" : "bg-muted-foreground/40",
+                        )} />
+                        <span className={cn("text-sm", selected ? "text-primary" : "text-muted-foreground")}>
+                          {t(`charset_${key}`)}
+                        </span>
+                      </label>
+                    )
+                  })}
+                  <label
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2.5 rounded-[10px] cursor-pointer select-none transition-colors",
+                      useCustomCharset ? "bg-primary/10" : "bg-muted/50 hover:bg-muted/70",
+                    )}
+                  >
                     <input
                       type="checkbox"
                       checked={useCustomCharset}
                       onChange={(e) => setUseCustomCharset(e.target.checked)}
-                      className="rounded border-gray-300"
+                      className="sr-only"
                     />
-                    {t("charset_custom")}
+                    <span className={cn(
+                      "w-2 h-2 rounded-full flex-shrink-0 transition-colors",
+                      useCustomCharset ? "bg-primary" : "bg-muted-foreground/40",
+                    )} />
+                    <span className={cn("text-sm", useCustomCharset ? "text-primary" : "text-muted-foreground")}>
+                      {t("charset_custom")}
+                    </span>
                   </label>
                 </div>
                 {useCustomCharset && (
@@ -1122,131 +1140,191 @@ const handleCopy = async (password: string) => {
                     value={customCharset}
                     onChange={(e) => setCustomCharset(e.target.value)}
                     placeholder={t("charset_custom_placeholder")}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full bg-muted/50 rounded-xl px-4 py-3 text-sm font-mono outline-none focus:bg-muted/70 transition-colors mb-3"
                   />
                 )}
-                {/* 当前字符集预览 */}
-                <p className="text-xs text-muted-foreground font-mono truncate">
+                <p className="text-xs text-muted-foreground/60 font-mono leading-relaxed">
                   {buildCharset().slice(0, 60)}
-                  {buildCharset().length > 60 ? "..." : ""}
-                  {" "}({buildCharset().length} chars)
+                  {buildCharset().length > 60 ? "…" : ""}
+                  {"  ·  "}
+                  {buildCharset().length} chars
                 </p>
               </div>
 
-              {/* 长度设置 */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">
-                    {t("min_length")}
-                  </label>
-                  <input
-                    type="number"
-                    value={minLength}
-                    onChange={(e) =>
-                      setMinLength(Math.max(1, parseInt(e.target.value) || 1))
-                    }
-                    min={1}
-                    max={12}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+              {/* 密码长度 */}
+              <div className="bg-muted/30 rounded-2xl p-6">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+                  {t("min_length")} / {t("max_length")}
                 </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">
-                    {t("max_length")}
-                  </label>
-                  <input
-                    type="number"
-                    value={maxLength}
-                    onChange={(e) =>
-                      setMaxLength(Math.max(1, parseInt(e.target.value) || 1))
-                    }
-                    min={1}
-                    max={12}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      {t("min_length")}
+                    </label>
+                    <input
+                      type="number"
+                      value={minLength}
+                      onChange={(e) => setMinLength(Math.max(1, parseInt(e.target.value) || 1))}
+                      min={1}
+                      max={12}
+                      className="w-full bg-muted/50 rounded-[10px] px-3.5 py-3 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                      {t("max_length")}
+                    </label>
+                    <input
+                      type="number"
+                      value={maxLength}
+                      onChange={(e) => setMaxLength(Math.max(1, parseInt(e.target.value) || 1))}
+                      min={1}
+                      max={12}
+                      className="w-full bg-muted/50 rounded-[10px] px-3.5 py-3 text-[15px] font-medium outline-none focus:bg-muted/70 transition-colors"
+                    />
+                  </div>
                 </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-sm font-medium">{t("scheduler_priority")}</label>
-                <input
-                  type="number"
-                  value={priority}
-                  onChange={(e) => setPriority(parseInt(e.target.value, 10) || 0)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
               </div>
             </div>
           )}
 
+          {/* 掩码模式 */}
           {activeTab === "mask" && (
             <div className="space-y-3">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t("mask_pattern")}</label>
+              <div className="bg-muted/30 rounded-2xl p-6">
+                <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+                  {t("mask_pattern")}
+                </div>
                 <input
                   type="text"
                   value={maskPattern}
                   onChange={(e) => setMaskPattern(e.target.value)}
                   placeholder={t("mask_placeholder")}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  spellCheck={false}
+                  className="w-full bg-muted/50 rounded-xl px-4 py-3.5 text-primary font-mono text-lg font-medium tracking-wider outline-none focus:bg-muted/70 transition-colors"
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t("mask_hint")}
-                </p>
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {([
+                    ["?l", t("charset_lowercase")],
+                    ["?u", t("charset_uppercase")],
+                    ["?d", t("charset_digits")],
+                    ["?s", t("charset_special")],
+                    ["?a", t("mask_any")],
+                    ["??", t("mask_literal_q")],
+                  ] as [string, string][]).map(([key, desc]) => (
+                    <span
+                      key={key}
+                      className="bg-muted/50 rounded-md px-2.5 py-1 text-[11.5px] font-mono text-muted-foreground"
+                    >
+                      <strong className="font-medium text-primary">{key}</strong>{" "}{desc}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           )}
 
-          {activeTab !== "bruteforce" && (
-            <div className="space-y-1">
-              <label className="text-sm font-medium">{t("scheduler_priority")}</label>
-              <input
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(parseInt(e.target.value, 10) || 0)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+          {/* 优先级 stepper — 所有 tab 共用 */}
+          <div className="bg-muted/30 rounded-2xl p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              {t("scheduler_priority")}
             </div>
-          )}
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium">{t("recovery_backend")}</label>
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="flex items-start gap-2 rounded-md border p-3 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name={`recovery-backend-${task.id}`}
-                  aria-label={t("recovery_backend_cpu")}
-                  checked={backend === "cpu"}
-                  onChange={() => setBackend("cpu")}
-                  className="mt-1 h-4 w-4 accent-primary"
-                />
-                <span className="space-y-1">
-                  <span className="block font-medium">{t("recovery_backend_cpu")}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{t("scheduler_priority")}</span>
+              <div className="flex items-center bg-muted/50 rounded-[10px] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setPriority((p) => Math.max(0, p - 1))}
+                  className="w-9 h-9 flex items-center justify-center text-lg text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+                  aria-label="decrease priority"
+                >
+                  −
+                </button>
+                <span className="min-w-[40px] text-center text-[15px] font-medium">
+                  {priority}
                 </span>
-              </label>
-              <label
+                <button
+                  type="button"
+                  onClick={() => setPriority((p) => p + 1)}
+                  className="w-9 h-9 flex items-center justify-center text-lg text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+                  aria-label="increase priority"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 恢复后端 */}
+          <div className="bg-muted/30 rounded-2xl p-6">
+            <div className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              {t("recovery_backend")}
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* CPU */}
+              <div
+                role="radio"
+                aria-checked={backend === "cpu"}
+                aria-label={t("recovery_backend_cpu")}
+                tabIndex={0}
+                onClick={() => setBackend("cpu")}
+                onKeyDown={(e) => e.key === "Enter" && setBackend("cpu")}
                 className={cn(
-                  "flex items-start gap-2 rounded-md border p-3 text-sm",
-                  supportsGpuBackend ? "cursor-pointer" : "cursor-not-allowed opacity-60",
+                  "p-4 rounded-xl cursor-pointer select-none transition-colors",
+                  backend === "cpu" ? "bg-primary/10" : "bg-muted/50 hover:bg-muted/70",
                 )}
               >
-                <input
-                  type="radio"
-                  name={`recovery-backend-${task.id}`}
-                  aria-label={t("recovery_backend_gpu")}
-                  checked={backend === "gpu"}
-                  onChange={() => setBackend("gpu")}
-                  disabled={!supportsGpuBackend}
-                  className="mt-1 h-4 w-4 accent-primary"
-                />
-                <span className="space-y-1">
-                  <span className="block font-medium">{t("recovery_backend_gpu")}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {t("recovery_backend_gpu_hint")}
+                <div className="flex items-center gap-2.5 mb-1">
+                  <span className={cn(
+                    "w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors",
+                    backend === "cpu" ? "border-primary" : "border-muted-foreground/40",
+                  )}>
+                    {backend === "cpu" && (
+                      <span className="w-2 h-2 rounded-full bg-primary block" />
+                    )}
                   </span>
-                </span>
-              </label>
+                  <span className={cn("text-sm font-medium", backend === "cpu" ? "text-primary" : "text-muted-foreground")}>
+                    {t("recovery_backend_cpu")}
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-muted-foreground/60 leading-relaxed pl-[26px]">
+                  {t("recovery_backend_cpu_hint")}
+                </p>
+              </div>
+              {/* GPU */}
+              <div
+                role="radio"
+                aria-checked={backend === "gpu"}
+                aria-label={t("recovery_backend_gpu")}
+                tabIndex={supportsGpuBackend ? 0 : -1}
+                onClick={() => supportsGpuBackend && setBackend("gpu")}
+                onKeyDown={(e) => e.key === "Enter" && supportsGpuBackend && setBackend("gpu")}
+                className={cn(
+                  "p-4 rounded-xl select-none transition-colors",
+                  !supportsGpuBackend
+                    ? "opacity-50 cursor-not-allowed"
+                    : backend === "gpu"
+                      ? "bg-primary/10 cursor-pointer"
+                      : "bg-muted/50 hover:bg-muted/70 cursor-pointer",
+                )}
+              >
+                <div className="flex items-center gap-2.5 mb-1">
+                  <span className={cn(
+                    "w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors",
+                    backend === "gpu" ? "border-primary" : "border-muted-foreground/40",
+                  )}>
+                    {backend === "gpu" && (
+                      <span className="w-2 h-2 rounded-full bg-primary block" />
+                    )}
+                  </span>
+                  <span className={cn("text-sm font-medium", backend === "gpu" ? "text-primary" : "text-muted-foreground")}>
+                    {t("recovery_backend_gpu")}
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-muted-foreground/60 leading-relaxed pl-[26px]">
+                  {t("recovery_backend_gpu_hint")}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -1257,6 +1335,25 @@ const handleCopy = async (password: string) => {
               {error}
             </div>
           )}
+
+          {/* 开始按钮 — 全宽，漂浮感 */}
+          <button
+            onClick={() => void handleStart()}
+            disabled={isStarting}
+            className={cn(
+              "w-full rounded-2xl py-4 font-semibold text-[15px] flex items-center justify-center gap-2 shadow-lg transition-all mt-1",
+              isStarting
+                ? "bg-primary/60 cursor-not-allowed text-white/80 shadow-primary/15"
+                : "bg-primary text-white shadow-primary/25 hover:shadow-primary/40 hover:-translate-y-px",
+            )}
+          >
+            {isStarting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            {isStarting ? t("starting") : t("start_recovery")}
+          </button>
         </div>
       )}
     </section>
