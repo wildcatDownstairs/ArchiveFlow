@@ -433,7 +433,7 @@ const handleExport = async (format: ExportFormat) => {
               </button>
               
               {isFileTreeExpanded && (
-                <div className="max-h-[calc(100vh-24rem)] min-h-[30rem] rounded-lg border bg-card p-4 overflow-y-auto">
+                <div className="max-h-[calc(100vh-24rem)] rounded-lg border bg-card p-4 overflow-y-auto">
                   {fileTree.map((node) => (
                     <FileTreeNode key={node.path} node={node} t={t} />
                   ))}
