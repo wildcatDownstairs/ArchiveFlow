@@ -231,6 +231,11 @@ const handleExport = async (format: ExportFormat) => {
   const info = task.archive_info
   const fileTree = info ? buildFileTree(info.entries) : []
   const canExportTask = EXPORTABLE_STATUSES.includes(task.status)
+  const hasRecoveryPanel =
+    (task.archive_type === "zip" ||
+      task.archive_type === "sevenz" ||
+      task.archive_type === "rar") &&
+    !!info?.is_encrypted
 
   return (
     <div className="p-6 space-y-6">
@@ -292,8 +297,8 @@ const handleExport = async (format: ExportFormat) => {
 
       {/* 主体内容：主区 + 右侧边栏 */}
       <div className="flex flex-col xl:flex-row gap-6 items-start">
-        {/* 右侧：密码恢复面板 - 仅在有加密文件时显示 */}
-        {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
+        {/* 主区域：密码恢复面板 - 仅在有加密文件时显示 */}
+        {hasRecoveryPanel && (
           <div className="flex flex-col gap-6 flex-1 min-w-0">
             <RecoveryPanel
               task={task}
@@ -303,7 +308,10 @@ const handleExport = async (format: ExportFormat) => {
         )}
 
         {/* 右侧侧边栏：元信息 + 文件树 */}
-        <aside className="w-full xl:w-72 flex-shrink-0 flex flex-col gap-4">
+        <aside className={cn(
+          "flex-shrink-0 flex flex-col gap-4",
+          hasRecoveryPanel ? "w-full xl:w-72" : "w-full"
+        )}>
           {/* 元信息卡片 */}
           <div className="rounded-lg border bg-card shadow-sm p-4 space-y-3">
             <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-sm">
