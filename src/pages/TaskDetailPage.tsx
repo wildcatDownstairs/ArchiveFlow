@@ -35,21 +35,21 @@ import RecoveryPanel from "@/components/RecoveryPanel"
 import type { Task, ExportFormat } from "@/types"
 
 const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
-  ready: "bg-cyan-100 text-cyan-800",
-  processing: "bg-indigo-100 text-indigo-800",
-  succeeded: "bg-green-100 text-green-800",
-  exhausted: "bg-amber-100 text-amber-800",
-  cancelled: "bg-gray-200 text-gray-800",
-  failed: "bg-red-100 text-red-800",
-  unsupported: "bg-slate-200 text-slate-800",
-  interrupted: "bg-orange-100 text-orange-800",
+  ready: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+  processing: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
+  succeeded: "bg-green-500/15 text-green-700 dark:text-green-400",
+  exhausted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  cancelled: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+  failed: "bg-red-500/15 text-red-700 dark:text-red-400",
+  unsupported: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
+  interrupted: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
 }
 
 const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
-  zip: "bg-blue-100 text-blue-800",
-  sevenz: "bg-green-100 text-green-800",
-  rar: "bg-orange-100 text-orange-800",
-  unknown: "bg-gray-100 text-gray-800",
+  zip: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  sevenz: "bg-green-500/15 text-green-700 dark:text-green-400",
+  rar: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+  unknown: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
 }
 
 const EXPORTABLE_STATUSES: Task["status"][] = [
@@ -223,7 +223,7 @@ const handleExport = async (format: ExportFormat) => {
   const canExportTask = EXPORTABLE_STATUSES.includes(task.status)
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 h-full flex flex-col space-y-6">
       {/* 导航 */}
       <div className="flex items-center justify-between">
         <button
@@ -379,9 +379,9 @@ const handleExport = async (format: ExportFormat) => {
 
       {/* 文件树 */}
       {info && info.entries.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3">{t("archive_contents")}</h2>
-          <div className="rounded-lg border p-4 max-h-96 overflow-y-auto">
+        <section className="flex flex-col min-h-0 flex-1">
+          <h2 className="text-lg font-semibold mb-3 flex-shrink-0">{t("archive_contents")}</h2>
+          <div className="rounded-lg border p-4 overflow-y-auto flex-1 bg-card">
             {fileTree.map((node) => (
               <FileTreeNode key={node.path} node={node} t={t} />
             ))}
@@ -391,10 +391,12 @@ const handleExport = async (format: ExportFormat) => {
 
       {/* 密码恢复面板 - 仅在有加密文件时显示 */}
       {(task.archive_type === "zip" || task.archive_type === "sevenz" || task.archive_type === "rar") && info?.is_encrypted && (
-        <RecoveryPanel
-          task={task}
-          onTaskStatusChange={handleRecoveryStatusChange}
-        />
+        <div className="flex-shrink-0">
+          <RecoveryPanel
+            task={task}
+            onTaskStatusChange={handleRecoveryStatusChange}
+          />
+        </div>
       )}
     </div>
   )

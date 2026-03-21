@@ -21,21 +21,21 @@ import type { Task } from "@/types"
 const ALLOWED_EXTENSIONS = ["zip", "7z", "rar"]
 
 const TYPE_BADGE_COLORS: Record<Task["archive_type"], string> = {
-  zip: "bg-blue-100 text-blue-800",
-  sevenz: "bg-green-100 text-green-800",
-  rar: "bg-orange-100 text-orange-800",
-  unknown: "bg-gray-100 text-gray-800",
+  zip: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  sevenz: "bg-green-500/15 text-green-700 dark:text-green-400",
+  rar: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+  unknown: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
 }
 
 const STATUS_BADGE_COLORS: Record<Task["status"], string> = {
-  ready: "bg-cyan-100 text-cyan-800",
-  processing: "bg-indigo-100 text-indigo-800",
-  succeeded: "bg-green-100 text-green-800",
-  exhausted: "bg-amber-100 text-amber-800",
-  cancelled: "bg-gray-200 text-gray-800",
-  failed: "bg-red-100 text-red-800",
-  unsupported: "bg-slate-200 text-slate-800",
-  interrupted: "bg-orange-100 text-orange-800",
+  ready: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+  processing: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
+  succeeded: "bg-green-500/15 text-green-700 dark:text-green-400",
+  exhausted: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  cancelled: "bg-gray-500/15 text-gray-700 dark:text-gray-400",
+  failed: "bg-red-500/15 text-red-700 dark:text-red-400",
+  unsupported: "bg-slate-500/15 text-slate-700 dark:text-slate-400",
+  interrupted: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
 }
 
 /**
