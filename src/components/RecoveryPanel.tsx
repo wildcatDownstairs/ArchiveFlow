@@ -126,21 +126,27 @@ export default function RecoveryPanel({
 
   const refreshSchedulerState = useCallback(async (options?: {
     respectTaskStatus?: boolean
+    snapshotOnly?: boolean
   }) => {
     try {
+      const snapshotOnly = options?.snapshotOnly ?? false
       const [scheduled, snapshot] = await Promise.all([
-        api.getScheduledRecovery(task.id),
+        snapshotOnly ? Promise.resolve(null) : api.getScheduledRecovery(task.id),
         api.getRecoverySchedulerSnapshot(),
       ])
-      const shouldRespectTaskStatus = options?.respectTaskStatus ?? true
-      setScheduledRecovery(scheduled)
+      if (!snapshotOnly) {
+        const shouldRespectTaskStatus = options?.respectTaskStatus ?? true
+        setScheduledRecovery(scheduled)
+        setIsRunning(
+          scheduled?.state === "running" ||
+            (shouldRespectTaskStatus && task.status === "processing"),
+        )
+      }
       setSchedulerSnapshot(snapshot)
-      setIsRunning(
-        scheduled?.state === "running" ||
-          (shouldRespectTaskStatus && task.status === "processing"),
-      )
     } catch {
-      setScheduledRecovery(null)
+      if (!options?.snapshotOnly) {
+        setScheduledRecovery(null)
+      }
       setSchedulerSnapshot(null)
     }
   }, [task.id, task.status])
@@ -179,7 +185,7 @@ export default function RecoveryPanel({
         })
         setIsRunning(false)
         setScheduledRecovery(null)
-        void refreshSchedulerState({ respectTaskStatus: false })
+        void refreshSchedulerState({ snapshotOnly: true })
         void refreshAuditEvents()
         onTaskStatusChange?.()
       }

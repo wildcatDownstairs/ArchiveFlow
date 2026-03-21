@@ -1,11 +1,3 @@
-/**
- * @fileoverview 文件功能：实现 SettingsPage.test 页面组件
- * @author ArchiveFlow Team
- * @created 2026-03-21
- * @modified 2026-03-21
- * @dependencies @testing-library/react, @testing-library/user-event, vitest
- */
-
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -101,5 +93,14 @@ describe("SettingsPage", () => {
     expect(await screen.findByText("已检测到可用的 hashcat GPU 环境")).toBeInTheDocument()
     expect(screen.getByText(/v7\.0\.0/)).toBeInTheDocument()
     expect(screen.getByText(/RTX 4080/)).toBeInTheDocument()
+  })
+
+  it("首次打开设置页时会自动探测本机 hashcat 并预填路径", async () => {
+    render(<SettingsPage />)
+
+    await waitFor(() => {
+      expect(api.detectHashcat).toHaveBeenCalled()
+    })
+    expect(await screen.findByDisplayValue("C:/Tools/hashcat/hashcat.exe")).toBeInTheDocument()
   })
 })

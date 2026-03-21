@@ -1,11 +1,3 @@
-/**
- * @fileoverview 文件功能：实现 RecoveryPanel.test UI 组件
- * @author ArchiveFlow Team
- * @created 2026-03-21
- * @modified 2026-03-21
- * @dependencies @testing-library/react, @testing-library/user-event, vitest, @tauri-apps/plugin-dialog, @tauri-apps/plugin-fs
- */
-
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -72,6 +64,17 @@ const STALE_QUEUED_RECOVERY: ScheduledRecovery = {
   state: "queued",
   requested_at: "2026-03-21T00:00:00Z",
   started_at: null,
+}
+
+const STALE_RUNNING_RECOVERY: ScheduledRecovery = {
+  task_id: RUNNING_TASK.id,
+  mode: { type: "dictionary", wordlist: ["alpha"] },
+  priority: 2,
+  backend: "cpu",
+  hashcat_path: null,
+  state: "running",
+  requested_at: "2026-03-21T00:00:00Z",
+  started_at: "2026-03-21T00:00:01Z",
 }
 
 describe("RecoveryPanel", () => {
@@ -210,6 +213,39 @@ describe("RecoveryPanel", () => {
       ...EMPTY_SCHEDULER_SNAPSHOT,
       queued_count: 1,
       tasks: [STALE_QUEUED_RECOVERY],
+    })
+
+    render(<RecoveryPanel task={RUNNING_TASK} />)
+
+    await waitFor(() => {
+      expect(api.onRecoveryProgress).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      progressListener?.({
+        task_id: RUNNING_TASK.id,
+        tried: 12,
+        total: 12,
+        speed: 100,
+        status: "exhausted",
+        found_password: null,
+        elapsed_seconds: 0.2,
+        worker_count: 4,
+        last_checkpoint_at: "2026-03-21T00:00:00Z",
+      })
+    })
+
+    expect(await screen.findByText("已穷尽所有候选密码")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "暴力破解" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "开始恢复" })).toBeInTheDocument()
+  })
+
+  it("字典恢复结束后即使API返回运行中的调度记录也能切换模式", async () => {
+    vi.mocked(api.getScheduledRecovery).mockResolvedValue(STALE_RUNNING_RECOVERY)
+    vi.mocked(api.getRecoverySchedulerSnapshot).mockResolvedValue({
+      ...EMPTY_SCHEDULER_SNAPSHOT,
+      running_count: 1,
+      tasks: [STALE_RUNNING_RECOVERY],
     })
 
     render(<RecoveryPanel task={RUNNING_TASK} />)
