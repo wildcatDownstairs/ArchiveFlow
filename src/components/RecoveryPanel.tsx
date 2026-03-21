@@ -56,12 +56,14 @@ export default function RecoveryPanel({
 }: RecoveryPanelProps) {
   const { t } = useTranslation()
   const recoveryPreferences = useAppStore((state) => state.recoveryPreferences)
+  const recoveryDrafts = useAppStore((state) => state.recoveryDrafts)
+  const updateRecoveryDrafts = useAppStore((state) => state.updateRecoveryDrafts)
 
   // 攻击模式
   const [activeTab, setActiveTab] = useState<AttackTab>("dictionary")
 
   // 字典模式配置
-  const [wordlistText, setWordlistText] = useState("")
+  const [wordlistText, setWordlistText] = useState(recoveryDrafts.dictionaryText)
   const [dictionaryOptions, setDictionaryOptions] = useState({
     uppercase: false,
     capitalize: true,
@@ -89,6 +91,10 @@ export default function RecoveryPanel({
   const [scheduledRecovery, setScheduledRecovery] = useState<ScheduledRecovery | null>(null)
   const [schedulerSnapshot, setSchedulerSnapshot] = useState<RecoverySchedulerSnapshot | null>(null)
   const [recentAuditEvents, setRecentAuditEvents] = useState<AuditEvent[]>([])
+  const [taskStatusOverride, setTaskStatusOverride] = useState<{
+    taskId: string
+    status: Task["status"]
+  } | null>(null)
   const [isRunning, setIsRunning] = useState(
     task.status === "processing",
   )
@@ -98,6 +104,8 @@ export default function RecoveryPanel({
 
   // unlisten ref
   const unlistenRef = useRef<(() => void) | null>(null)
+  const effectiveTaskStatus =
+    taskStatusOverride?.taskId === task.id ? taskStatusOverride.status : task.status
 
   const refreshSchedulerState = useCallback(async (options?: {
     respectTaskStatus?: boolean
@@ -141,6 +149,17 @@ export default function RecoveryPanel({
 
       // 终态处理
       if (p.status !== "running") {
+        setTaskStatusOverride({
+          taskId: task.id,
+          status:
+            p.status === "found"
+              ? "succeeded"
+              : p.status === "exhausted"
+                ? "exhausted"
+                : p.status === "cancelled"
+                  ? "cancelled"
+                  : "failed",
+        })
         setIsRunning(false)
         setScheduledRecovery(null)
         void refreshSchedulerState({ respectTaskStatus: false })
@@ -244,7 +263,13 @@ export default function RecoveryPanel({
       if (!selected || Array.isArray(selected)) return
 
       const content = await readTextFile(selected)
-      setWordlistText((prev) => [prev, content].filter(Boolean).join(prev ? "\n" : ""))
+      const nextText = [wordlistText, content].filter(Boolean).join(wordlistText ? "\n" : "")
+      const sourceName = selected.split(/[\\/]/).pop() ?? selected
+      setWordlistText(nextText)
+      updateRecoveryDrafts({
+        dictionaryText: nextText,
+        dictionarySourceName: sourceName,
+      })
     } catch (e) {
       setError(String(e))
     }
@@ -276,9 +301,14 @@ export default function RecoveryPanel({
           JSON.stringify({ wordlist: candidates }),
           priority,
         )
+        setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
         if (recoveryPreferences.autoClearDictionaryInput) {
           setWordlistText("")
+          updateRecoveryDrafts({
+            dictionaryText: "",
+            dictionarySourceName: null,
+          })
         }
       } else if (activeTab === "bruteforce") {
         const charset = buildCharset()
@@ -300,6 +330,7 @@ export default function RecoveryPanel({
           }),
           priority,
         )
+        setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
       } else {
         if (!maskPattern.trim()) {
@@ -314,6 +345,7 @@ export default function RecoveryPanel({
           }),
           priority,
         )
+        setTaskStatusOverride({ taskId: task.id, status: "processing" })
         setIsRunning(nextState === "running")
       }
       await refreshSchedulerState({ respectTaskStatus: false })
@@ -328,6 +360,7 @@ export default function RecoveryPanel({
   const handleCancel = async () => {
     try {
       await api.cancelRecovery(task.id)
+      setTaskStatusOverride({ taskId: task.id, status: "cancelled" })
       setIsRunning(false)
       await refreshSchedulerState({ respectTaskStatus: false })
       await refreshAuditEvents()
@@ -352,6 +385,9 @@ export default function RecoveryPanel({
     setError(null)
     try {
       const nextState = await api.resumeRecovery(task.id)
+      if (nextState === "running") {
+        setTaskStatusOverride({ taskId: task.id, status: "processing" })
+      }
       setIsRunning(nextState === "running")
       await refreshSchedulerState({ respectTaskStatus: false })
       await refreshAuditEvents()
@@ -393,15 +429,15 @@ export default function RecoveryPanel({
     | null =
     progress && progress.status !== "running"
       ? progress.status
-      : task.status === "succeeded"
+      : effectiveTaskStatus === "succeeded"
         ? "found"
-        : task.status === "exhausted"
+        : effectiveTaskStatus === "exhausted"
           ? "exhausted"
-          : task.status === "cancelled"
+          : effectiveTaskStatus === "cancelled"
             ? "cancelled"
-            : task.status === "interrupted"
+            : effectiveTaskStatus === "interrupted"
               ? "interrupted"
-            : task.status === "failed"
+              : effectiveTaskStatus === "failed"
               ? "error"
               : null
 
@@ -454,11 +490,11 @@ export default function RecoveryPanel({
     !isRunning &&
     scheduledRecovery === null &&
     (
-      task.status === "ready" ||
-      task.status === "failed" ||
-      task.status === "cancelled" ||
-      task.status === "exhausted" ||
-      task.status === "interrupted"
+      effectiveTaskStatus === "ready" ||
+      effectiveTaskStatus === "failed" ||
+      effectiveTaskStatus === "cancelled" ||
+      effectiveTaskStatus === "exhausted" ||
+      effectiveTaskStatus === "interrupted"
     )
   const canResume = canStart && checkpoint !== null
 
@@ -804,11 +840,22 @@ export default function RecoveryPanel({
               </label>
               <textarea
                 value={wordlistText}
-                onChange={(e) => setWordlistText(e.target.value)}
+                onChange={(e) => {
+                  const nextText = e.target.value
+                  setWordlistText(nextText)
+                  updateRecoveryDrafts({
+                    dictionaryText: nextText,
+                  })
+                }}
                 placeholder={t("dictionary_placeholder")}
                 rows={6}
                 className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
+              {recoveryDrafts.dictionarySourceName && (
+                <p className="text-xs text-muted-foreground">
+                  {recoveryDrafts.dictionarySourceName}
+                </p>
+              )}
               <p className="text-xs text-muted-foreground">
                 {
                   wordlistText

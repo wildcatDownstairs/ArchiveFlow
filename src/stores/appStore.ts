@@ -2,6 +2,7 @@ import { create } from "zustand"
 
 const LOCALE_STORAGE_KEY = "archiveflow.locale"
 const RECOVERY_PREFERENCES_STORAGE_KEY = "archiveflow.recovery-preferences"
+const RECOVERY_DRAFTS_STORAGE_KEY = "archiveflow.recovery-drafts"
 
 export interface CharsetFlags {
   lowercase: boolean
@@ -25,6 +26,11 @@ export interface RecoveryPreferences {
   maxConcurrentRecoveries: number
 }
 
+export interface RecoveryDrafts {
+  dictionaryText: string
+  dictionarySourceName: string | null
+}
+
 const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
   defaultCharsetFlags: {
     lowercase: true,
@@ -41,6 +47,11 @@ const DEFAULT_RECOVERY_PREFERENCES: RecoveryPreferences = {
   exportMaskPasswords: false,
   exportIncludeAuditEvents: true,
   maxConcurrentRecoveries: 1,
+}
+
+const DEFAULT_RECOVERY_DRAFTS: RecoveryDrafts = {
+  dictionaryText: "",
+  dictionarySourceName: null,
 }
 
 function getInitialLocale(): string {
@@ -75,11 +86,30 @@ function getInitialRecoveryPreferences(): RecoveryPreferences {
   }
 }
 
+function getInitialRecoveryDrafts(): RecoveryDrafts {
+  if (typeof window === "undefined") return DEFAULT_RECOVERY_DRAFTS
+
+  try {
+    const stored = window.localStorage.getItem(RECOVERY_DRAFTS_STORAGE_KEY)
+    if (!stored) return DEFAULT_RECOVERY_DRAFTS
+
+    const parsed = JSON.parse(stored) as Partial<RecoveryDrafts>
+    return {
+      ...DEFAULT_RECOVERY_DRAFTS,
+      ...parsed,
+    }
+  } catch {
+    return DEFAULT_RECOVERY_DRAFTS
+  }
+}
+
 interface AppState {
   locale: string
   setLocale: (locale: string) => void
   recoveryPreferences: RecoveryPreferences
   updateRecoveryPreferences: (patch: Partial<RecoveryPreferences>) => void
+  recoveryDrafts: RecoveryDrafts
+  updateRecoveryDrafts: (patch: Partial<RecoveryDrafts>) => void
   sidebarCollapsed: boolean
   toggleSidebar: () => void
 }
@@ -120,6 +150,27 @@ export const useAppStore = create<AppState>((set) => ({
       }
 
       return { recoveryPreferences: next }
+    }),
+  recoveryDrafts: getInitialRecoveryDrafts(),
+  updateRecoveryDrafts: (patch) =>
+    set((state) => {
+      const next = {
+        ...state.recoveryDrafts,
+        ...patch,
+      }
+
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(
+            RECOVERY_DRAFTS_STORAGE_KEY,
+            JSON.stringify(next),
+          )
+        } catch {
+          // Ignore storage failures and keep in-memory state consistent.
+        }
+      }
+
+      return { recoveryDrafts: next }
     }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),

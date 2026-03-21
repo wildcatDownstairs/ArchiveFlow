@@ -1,10 +1,13 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import "@/i18n"
 import RecoveryPanel from "@/components/RecoveryPanel"
 import * as api from "@/services/api"
 import { useAppStore } from "@/stores/appStore"
 import type { RecoveryCheckpoint, RecoveryProgress, RecoverySchedulerSnapshot, Task } from "@/types"
+import { open } from "@tauri-apps/plugin-dialog"
+import { readTextFile } from "@tauri-apps/plugin-fs"
 
 vi.mock("@/services/api", () => ({
   onRecoveryProgress: vi.fn(),
@@ -72,6 +75,10 @@ describe("RecoveryPanel", () => {
         exportMaskPasswords: false,
         exportIncludeAuditEvents: true,
         maxConcurrentRecoveries: 1,
+      },
+      recoveryDrafts: {
+        dictionaryText: "",
+        dictionarySourceName: null,
       },
     }))
 
@@ -145,5 +152,55 @@ describe("RecoveryPanel", () => {
     expect(
       screen.getByText((content) => content.startsWith("最近断点保存:")),
     ).toBeInTheDocument()
+  })
+
+  it("导入的字典文本会在面板重新挂载后保留", async () => {
+    const user = userEvent.setup()
+    vi.mocked(open).mockResolvedValue("C:/tmp/passwords.txt")
+    vi.mocked(readTextFile).mockResolvedValue("alpha\nbeta")
+
+    const { unmount } = render(<RecoveryPanel task={READY_TASK} />)
+
+    await user.click(await screen.findByRole("button", { name: "导入字典文件" }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox")).toHaveValue("alpha\nbeta")
+    })
+    expect(screen.getByText("passwords.txt")).toBeInTheDocument()
+
+    unmount()
+
+    render(<RecoveryPanel task={READY_TASK} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox")).toHaveValue("alpha\nbeta")
+    })
+    expect(screen.getByText("passwords.txt")).toBeInTheDocument()
+  })
+
+  it("字典恢复结束后即使父任务状态还没刷新也能重新切换模式", async () => {
+    render(<RecoveryPanel task={RUNNING_TASK} />)
+
+    await waitFor(() => {
+      expect(api.onRecoveryProgress).toHaveBeenCalledTimes(1)
+    })
+
+    act(() => {
+      progressListener?.({
+        task_id: RUNNING_TASK.id,
+        tried: 12,
+        total: 12,
+        speed: 100,
+        status: "exhausted",
+        found_password: null,
+        elapsed_seconds: 0.2,
+        worker_count: 4,
+        last_checkpoint_at: "2026-03-21T00:00:00Z",
+      })
+    })
+
+    expect(await screen.findByText("已穷尽所有候选密码")).toBeInTheDocument()
+    expect(await screen.findByRole("button", { name: "暴力破解" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "开始恢复" })).toBeInTheDocument()
   })
 })
