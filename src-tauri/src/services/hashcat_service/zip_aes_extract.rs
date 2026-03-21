@@ -9,12 +9,20 @@ const MAX_ZIP_AES_CONTENT_SIZE: u64 = 8 * 1024 * 1024;
 /// hashcat mode 17200 / 17210 的 `compressed_length` / `data_length` 最大长度。
 /// 对应 hashcat `module_17200.c` / `module_17210.c` 里的 `MAX_DATA (320 * 1024)`。
 const MAX_PKZIP_DATA_SIZE: u64 = 320 * 1024;
+const ZIP_LOCAL_FILE_HEADER_SIGNATURE: u32 = 0x0403_4b50;
+const ZIP_FLAG_DATA_DESCRIPTOR: u16 = 1 << 3;
 
 /// 交给 hashcat 的 ZIP hash 信息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HashcatZipHash {
     pub hash_mode: u32,
     pub hash_string: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PkzipLocalHeaderMetadata {
+    general_purpose_flag: u16,
+    last_modified_time: u16,
 }
 
 pub fn extract_zip_hash(file_path: &Path) -> Result<HashcatZipHash, String> {
@@ -159,8 +167,8 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
 ///   addoff  = data 长度 (= clen)
 ///   method  = 压缩方法 (8=Deflate, 0=Store)
 ///   dlen    = data 长度十六进制 (= clen)
-///   crc16   = crc32 & 0xffff，4 位小写十六进制
-///   crc_hi  = (crc32 >> 16) & 0xffff，4 位小写十六进制
+///   check1  = bit3 置位时用 DOS mtime，否则用 crc32 低 16 位
+///   check2  = crc32 高 16 位
 ///   data    = 完整加密负载（12 字节加密头 + 密文体）的十六进制
 pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String> {
     let file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
@@ -195,6 +203,7 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     let compressed_size = entry.compressed_size();
     let uncompressed_size = entry.size();
     let crc32 = entry.crc32();
+    let header_start = entry.header_start();
     let compress_method: u16 = match entry.compression() {
         zip::CompressionMethod::Stored => 0,
         zip::CompressionMethod::Deflated => 8,
@@ -223,8 +232,10 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
         ));
     }
 
-    // Read the full encrypted payload (12-byte PKZIP encryption header + ciphertext)
     let mut file = File::open(file_path).map_err(|e| format!("打开 ZIP 文件失败: {}", e))?;
+    let local_header = read_pkzip_local_header_metadata(&mut file, header_start)?;
+
+    // Read the full encrypted payload (12-byte PKZIP encryption header + ciphertext)
     file.seek(SeekFrom::Start(data_start))
         .map_err(|e| format!("定位 ZIP 数据段失败: {}", e))?;
 
@@ -257,12 +268,13 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     let crc32_hex = format!("{:08x}", crc32);
     let dlen_hex = clen_hex.clone();
     let addoff_hex = clen_hex.clone();
-    let crc16_hex = format!("{:04x}", crc32 & 0xffff);
-    let crc_hi_hex = format!("{:04x}", (crc32 >> 16) & 0xffff);
+    let (check1, check2) = pkzip_checksums(crc32, local_header);
+    let check1_hex = format!("{:04x}", check1);
+    let check2_hex = format!("{:04x}", check2);
     let data_hex = hex_encode(&encrypted_data);
 
     let hash_string = format!(
-        "$pkzip2$1*1*{ctype}*0*{clen}*{ulen}*{crc32}*0*{addoff}*{method}*{dlen}*{crc16}*{crc_hi}*{data}*$/pkzip2$",
+        "$pkzip2$1*1*{ctype}*0*{clen}*{ulen}*{crc32}*0*{addoff}*{method}*{dlen}*{check1}*{check2}*{data}*$/pkzip2$",
         ctype = ctype_flag,
         clen = clen_hex,
         ulen = ulen_hex,
@@ -270,8 +282,8 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
         addoff = addoff_hex,
         method = method,
         dlen = dlen_hex,
-        crc16 = crc16_hex,
-        crc_hi = crc_hi_hex,
+        check1 = check1_hex,
+        check2 = check2_hex,
         data = data_hex,
     );
 
@@ -279,6 +291,42 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
         hash_mode,
         hash_string,
     })
+}
+
+fn read_pkzip_local_header_metadata<R: Read + Seek>(
+    reader: &mut R,
+    header_start: u64,
+) -> Result<PkzipLocalHeaderMetadata, String> {
+    let mut header = [0_u8; 30];
+    reader
+        .seek(SeekFrom::Start(header_start))
+        .map_err(|e| format!("定位 ZIP 本地文件头失败: {}", e))?;
+    reader
+        .read_exact(&mut header)
+        .map_err(|e| format!("读取 ZIP 本地文件头失败: {}", e))?;
+
+    let signature = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+    if signature != ZIP_LOCAL_FILE_HEADER_SIGNATURE {
+        return Err(format!(
+            "ZIP 本地文件头签名无效: 期望 0x{ZIP_LOCAL_FILE_HEADER_SIGNATURE:08x}，实际 0x{signature:08x}"
+        ));
+    }
+
+    Ok(PkzipLocalHeaderMetadata {
+        general_purpose_flag: u16::from_le_bytes([header[6], header[7]]),
+        last_modified_time: u16::from_le_bytes([header[10], header[11]]),
+    })
+}
+
+fn pkzip_checksums(crc32: u32, local_header: PkzipLocalHeaderMetadata) -> (u16, u16) {
+    let primary = if local_header.general_purpose_flag & ZIP_FLAG_DATA_DESCRIPTOR != 0 {
+        local_header.last_modified_time
+    } else {
+        (crc32 & 0xffff) as u16
+    };
+    let secondary = ((crc32 >> 16) & 0xffff) as u16;
+
+    (primary, secondary)
 }
 
 fn find_winzip_aes_field(extra_data: &[u8]) -> Option<&[u8]> {
@@ -319,11 +367,13 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_zip_aes_hash, extract_zip_pkzip_hash, parse_winzip_aes_extra, HashcatZipHash,
+        extract_zip_aes_hash, extract_zip_pkzip_hash, parse_winzip_aes_extra, pkzip_checksums,
+        read_pkzip_local_header_metadata, HashcatZipHash, PkzipLocalHeaderMetadata,
     };
     use crate::domain::recovery::AttackMode;
     use crate::services::hashcat_service::{build_attack_args, run_hashcat};
     use crate::services::recovery_service::RecoveryResult;
+    use std::fs::File;
     use std::path::Path;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -384,6 +434,36 @@ mod tests {
         let (strength, compression) = parse_winzip_aes_extra(&extra).unwrap();
         assert_eq!(strength, 3);
         assert_eq!(compression, 8);
+    }
+
+    #[test]
+    fn read_pkzip_local_header_metadata_from_fixture() {
+        let path = zip_fixtures_dir().join("encrypted-pkzip.zip");
+        let mut file = File::open(path).unwrap();
+        let metadata = read_pkzip_local_header_metadata(&mut file, 0).unwrap();
+
+        assert_eq!(metadata.general_purpose_flag, 0x0001);
+        assert_eq!(metadata.last_modified_time, 0x9040);
+    }
+
+    #[test]
+    fn pkzip_checksums_use_crc_low_when_data_descriptor_is_absent() {
+        let metadata = PkzipLocalHeaderMetadata {
+            general_purpose_flag: 0x0001,
+            last_modified_time: 0x9040,
+        };
+
+        assert_eq!(pkzip_checksums(0x0d4a1185, metadata), (0x1185, 0x0d4a));
+    }
+
+    #[test]
+    fn pkzip_checksums_use_dos_time_when_data_descriptor_is_present() {
+        let metadata = PkzipLocalHeaderMetadata {
+            general_purpose_flag: 0x0009,
+            last_modified_time: 0xbd32,
+        };
+
+        assert_eq!(pkzip_checksums(0x6c935eec, metadata), (0xbd32, 0x6c93));
     }
 
     #[test]
