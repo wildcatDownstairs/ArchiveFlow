@@ -94,4 +94,13 @@ describe("SettingsPage", () => {
     expect(screen.getByText(/v7\.0\.0/)).toBeInTheDocument()
     expect(screen.getByText(/RTX 4080/)).toBeInTheDocument()
   })
+
+  it("首次打开设置页时会自动探测本机 hashcat 并预填路径", async () => {
+    render(<SettingsPage />)
+
+    await waitFor(() => {
+      expect(api.detectHashcat).toHaveBeenCalled()
+    })
+    expect(await screen.findByDisplayValue("C:/Tools/hashcat/hashcat.exe")).toBeInTheDocument()
+  })
 })

@@ -79,6 +79,36 @@ export default function SettingsPage() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const preloadHashcat = async () => {
+      if (recoveryPreferences.hashcatPath.trim()) {
+        return
+      }
+
+      try {
+        const result = await detectHashcat()
+        if (cancelled) return
+        setHashcatStatus(result)
+        if (result.path) {
+          setHashcatPathInput(result.path)
+          updateRecoveryPreferences({ hashcatPath: result.path })
+        }
+      } catch {
+        if (!cancelled) {
+          setHashcatStatus(null)
+        }
+      }
+    }
+
+    void preloadHashcat()
+
+    return () => {
+      cancelled = true
+    }
+  }, [recoveryPreferences.hashcatPath, updateRecoveryPreferences])
+
   const persistSettingChange = async (key: string, oldValue: unknown, newValue: unknown) => {
     try {
       await recordSettingChange(

@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -47,7 +48,7 @@ pub fn detect_hashcat(custom_path: Option<&Path>) -> Result<HashcatInfo, String>
                 path.display()
             ))
         }
-        None => find_hashcat_in_path()?,
+        None => find_hashcat_binary()?,
     };
 
     let version = get_version(&path)?;
@@ -79,16 +80,28 @@ pub fn detect_hashcat_for_ui(custom_path: Option<&Path>) -> HashcatDetectionResu
     }
 }
 
-fn find_hashcat_in_path() -> Result<PathBuf, String> {
+fn find_hashcat_binary() -> Result<PathBuf, String> {
+    if let Some(path) = find_hashcat_in_path() {
+        return Ok(path);
+    }
+
+    if let Some(path) = find_hashcat_in_archiveflow_tools() {
+        return Ok(path);
+    }
+
+    Err("未在 PATH 或 ArchiveFlow 本地工具目录中找到 hashcat，请在设置中指定 hashcat.exe 路径".to_string())
+}
+
+fn find_hashcat_in_path() -> Option<PathBuf> {
     let command = if cfg!(windows) { "where" } else { "which" };
     let executable = if cfg!(windows) { "hashcat.exe" } else { "hashcat" };
     let output = Command::new(command)
         .arg(executable)
         .output()
-        .map_err(|error| format!("无法查找 hashcat: {}", error))?;
+        .ok()?;
 
     if !output.status.success() {
-        return Err("未在 PATH 中找到 hashcat，请在设置中指定 hashcat.exe 路径".to_string());
+        return None;
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -98,7 +111,36 @@ fn find_hashcat_in_path() -> Result<PathBuf, String> {
         .find(|line| !line.is_empty())
         .map(PathBuf::from)
         .filter(|path| path.exists())
-        .ok_or_else(|| "未在 PATH 中找到可执行的 hashcat".to_string())
+}
+
+/// 允许应用在自己缓存的工具目录里自动发现 hashcat。
+/// 这样做的原因是：
+///   1. 用户可能没有把 hashcat.exe 加进 PATH；
+///   2. 但我们又希望“下载到本地工具目录后就能直接用”。
+///
+/// 当前只扫描一层版本目录，避免把整个磁盘递归一遍。
+fn find_hashcat_in_archiveflow_tools() -> Option<PathBuf> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA")?;
+    let tools_root = PathBuf::from(local_app_data)
+        .join("ArchiveFlow")
+        .join("tools")
+        .join("hashcat");
+    let direct_path = tools_root.join(if cfg!(windows) { "hashcat.exe" } else { "hashcat" });
+    if direct_path.exists() {
+        return Some(direct_path);
+    }
+
+    let entries = fs::read_dir(tools_root).ok()?;
+    for entry in entries.flatten() {
+        let candidate = entry
+            .path()
+            .join(if cfg!(windows) { "hashcat.exe" } else { "hashcat" });
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }
 
 fn get_version(path: &Path) -> Result<String, String> {
@@ -192,7 +234,7 @@ fn build_hashcat_command(path: &Path) -> Command {
 
 #[cfg(test)]
 mod tests {
-    use super::{detect_hashcat, parse_devices};
+    use super::{detect_hashcat, find_hashcat_in_archiveflow_tools, parse_devices};
     use std::path::Path;
 
     #[test]
@@ -223,5 +265,10 @@ Backend Device ID #2
     fn detect_hashcat_reports_missing_custom_path() {
         let result = detect_hashcat(Some(Path::new("C:/definitely/missing/hashcat.exe")));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn find_hashcat_in_archiveflow_tools_returns_none_without_cache_dir() {
+        let _ = find_hashcat_in_archiveflow_tools();
     }
 }
