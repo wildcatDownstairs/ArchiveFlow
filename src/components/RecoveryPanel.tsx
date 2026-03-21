@@ -414,7 +414,9 @@ export default function RecoveryPanel({
       ? Math.min((progress.tried / progress.total) * 100, 100)
       : 0
   const hasTerminalProgress = progress !== null && progress.status !== "running"
-  const showSchedulerCard = scheduledRecovery !== null && !hasTerminalProgress
+  const hasBlockingScheduledRecovery =
+    scheduledRecovery !== null && !hasTerminalProgress
+  const showSchedulerCard = hasBlockingScheduledRecovery
   const showRunningProgress = isRunning && progress?.status === "running"
   const showCancelButton =
     isRunning && !hasTerminalProgress && scheduledRecovery?.state !== "paused"
@@ -488,7 +490,7 @@ export default function RecoveryPanel({
   // 只有加密且状态允许时才显示
   const canStart =
     !isRunning &&
-    scheduledRecovery === null &&
+    !hasBlockingScheduledRecovery &&
     (
       effectiveTaskStatus === "ready" ||
       effectiveTaskStatus === "failed" ||

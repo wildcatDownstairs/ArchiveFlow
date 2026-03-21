@@ -5,7 +5,13 @@ import "@/i18n"
 import RecoveryPanel from "@/components/RecoveryPanel"
 import * as api from "@/services/api"
 import { useAppStore } from "@/stores/appStore"
-import type { RecoveryCheckpoint, RecoveryProgress, RecoverySchedulerSnapshot, Task } from "@/types"
+import type {
+  RecoveryCheckpoint,
+  RecoveryProgress,
+  RecoverySchedulerSnapshot,
+  ScheduledRecovery,
+  Task,
+} from "@/types"
 import { open } from "@tauri-apps/plugin-dialog"
 import { readTextFile } from "@tauri-apps/plugin-fs"
 
@@ -47,6 +53,15 @@ const RUNNING_TASK: Task = {
 const READY_TASK: Task = {
   ...RUNNING_TASK,
   status: "interrupted",
+}
+
+const STALE_QUEUED_RECOVERY: ScheduledRecovery = {
+  task_id: RUNNING_TASK.id,
+  mode: { type: "dictionary", wordlist: ["alpha"] },
+  priority: 2,
+  state: "queued",
+  requested_at: "2026-03-21T00:00:00Z",
+  started_at: null,
 }
 
 describe("RecoveryPanel", () => {
@@ -179,6 +194,13 @@ describe("RecoveryPanel", () => {
   })
 
   it("字典恢复结束后即使父任务状态还没刷新也能重新切换模式", async () => {
+    vi.mocked(api.getScheduledRecovery).mockResolvedValue(STALE_QUEUED_RECOVERY)
+    vi.mocked(api.getRecoverySchedulerSnapshot).mockResolvedValue({
+      ...EMPTY_SCHEDULER_SNAPSHOT,
+      queued_count: 1,
+      tasks: [STALE_QUEUED_RECOVERY],
+    })
+
     render(<RecoveryPanel task={RUNNING_TASK} />)
 
     await waitFor(() => {
