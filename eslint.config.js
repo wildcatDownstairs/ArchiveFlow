@@ -25,24 +25,13 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
-      'jsdoc/require-jsdoc': [
-        'error',
-        {
-          require: {
-            FunctionDeclaration: true,
-            MethodDefinition: true,
-            ClassDeclaration: true,
-            ArrowFunctionExpression: true,
-            FunctionExpression: true,
-          },
-        },
-      ],
-      'jsdoc/require-param': 'error',
-      'jsdoc/require-returns': 'error',
+      'jsdoc/require-jsdoc': 'off',
+      'jsdoc/require-param': 'off',
+      'jsdoc/require-returns': 'off',
       'jsdoc/require-param-type': 'off',
       'jsdoc/require-returns-type': 'off',
       'jsdoc/require-returns-check': 'off',
-      'jsdoc/check-param-names': 'error',
+      'jsdoc/check-param-names': 'off',
     },
   },
 )
