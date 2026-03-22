@@ -1,7 +1,14 @@
 # ArchiveFlow
 
-本地桌面端加密压缩包访问辅助与密码恢复工具，基于 **Tauri 2 + React 19 + Rust** 构建。
+<p align="center">
+  <img src="https://img.shields.io/badge/Tauri-2.0-24C8DB?style=flat-square&logo=tauri&logoColor=white" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" />
+  <img src="https://img.shields.io/badge/Rust-1.77+-000000?style=flat-square&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white" alt="Tailwind CSS v4" />
+  <img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License" />
+</p>
 
+> **本地桌面端加密压缩包访问辅助与密码恢复工具**  
 > 仅应用于你有权访问、审计、恢复或测试的归档文件。请勿用于未授权目标。
 
 ## 界面预览
@@ -40,37 +47,36 @@
 
 </details>
 
-## 功能特性
+## 🌟 功能特性
 
-- **归档导入与检测** — 支持 ZIP / 7Z / RAR，自动检测加密状态、条目列表与常见元数据
-- **文件树浏览** — 可展开/折叠的归档内容树，显示文件大小、加密标记
-- **CPU 密码恢复引擎** — Rust 原生多线程实现，支持三种攻击模式：
+- 📦 **归档导入与检测** — 支持 ZIP / 7Z / RAR，自动检测加密状态、条目列表与常见元数据
+- 🗂️ **文件树浏览** — 可展开/折叠的归档内容树，显示文件大小、加密标记
+- 🧠 **CPU 密码恢复引擎** — Rust 原生多线程实现，支持三种攻击模式：
   - **字典攻击**：逐个尝试候选密码列表，支持规则变换（大写/首字母大写/Leet/反转/重复/年份后缀/常见后缀）、分隔符组合、文件名常见模式
   - **暴力破解**：自定义字符集（小写/大写/数字/特殊字符）与长度范围穷举
   - **掩码攻击**：按位指定字符集，如 `?d?d?d?d`（支持 `?l ?u ?d ?s ?a ??`）
-- **GPU 加速恢复（hashcat V1）** — 集成外部 hashcat，实现数量级性能提升：
+- 🚀 **GPU 加速恢复（hashcat V1）** — 集成外部 hashcat，实现数量级性能提升：
   - 支持 ZIP AES（WinZip，hashcat mode 13600）与 PKZIP/ZipCrypto（mode 17200）
   - 自动发现本机 hashcat（PATH 或 `%LOCALAPPDATA%/ArchiveFlow/tools/hashcat/`）
   - 支持所有 hashcat 兼容 GPU（OpenCL / CUDA）；RTX 4080 实测约 1.2 亿次/秒（PKZIP）
   - 大文件保护：单条目压缩数据超过 10 MB 自动拒绝并引导使用 CPU 引擎
   - 启动时自动检测设备；初始化阶段（kernel 编译/autotune）显示脉冲动画与提示文字
   - V1 限制：仅支持 Windows + ZIP，不支持暂停/继续
-- **并行恢复** — CPU 模式默认按 `max(1, num_cpus::get() - 1)` 启用多 worker，兼容 Intel 混合架构与 Apple Silicon
-- **实时进度反馈** — 进度条 + 已尝试数 / 总数 / 速度（自动缩放：`118.8M 个/秒`）/ ETA / 设备数 / 最近断点时间
-- **可取消 / 暂停 / 恢复** — 调度器支持排队、暂停、继续；GPU 模式支持取消
-- **断点续跑** — CPU 恢复进度持久化到 SQLite，应用重启后可继续，并保留优先级上下文
-- **任务管理** — 完整的任务生命周期状态机，8 种状态（就绪 / 处理中 / 成功 / 已穷尽 / 已取消 / 失败 / 不支持 / 已中断）
-- **审计事件** — 操作日志完整记录，前端可按事件类型筛选浏览
-- **结果导出** — 支持 CSV / JSON 导出，包含任务摘要；可按设置默认脱敏密码并选择是否附带审计记录
-- **设置页面** — 语言切换、恢复默认配置、导出默认配置、结果保留策略、数据管理、hashcat 路径配置
-- **全新桌面 UI** — 首页 / 任务管理 / 操作记录 / 设置 四个页面已统一为新的桌面端布局，强调信息层级、卡片分区与更清晰的操作动线
-- **明暗双主题** — 内置浅色 / 深色主题切换，侧栏场景式主题开关支持动画过渡并持久化用户选择
-- **响应式设置中心** — 设置页支持双列到单列自适应布局，在较窄窗口下仍可完整操作
-- **启动画面** — 赛博朋克风格 boot screen，消除启动时白屏
-- **本地 SQLite 持久化** — 所有任务数据与归档元信息存储在本地数据库，无需联网
-- **国际化** — 支持简体中文（默认）与英文切换
+- ⚡ **并行恢复** — CPU 模式默认按 `max(1, num_cpus::get() - 1)` 启用多 worker，兼容 Intel 混合架构与 Apple Silicon
+- 📊 **实时进度反馈** — 进度条 + 已尝试数 / 总数 / 速度（自动缩放：`118.8M 个/秒`）/ ETA / 设备数 / 最近断点时间
+- ⏸️ **可取消 / 暂停 / 恢复** — 调度器支持排队、暂停、继续；GPU 模式支持取消
+- 💾 **断点续跑** — CPU 恢复进度持久化到 SQLite，应用重启后可继续，并保留优先级上下文
+- 📋 **任务管理** — 完整的任务生命周期状态机，8 种状态（就绪 / 处理中 / 成功 / 已穷尽 / 已取消 / 失败 / 不支持 / 已中断）
+- 🛡️ **审计事件** — 操作日志完整记录，前端可按事件类型筛选浏览
+- 📤 **结果导出** — 支持 CSV / JSON 导出，包含任务摘要；可按设置默认脱敏密码并选择是否附带审计记录
+- ⚙️ **设置页面** — 语言切换、恢复默认配置、导出默认配置、结果保留策略、数据管理、hashcat 路径配置
+- 🎨 **全新桌面 UI** — 首页 / 任务管理 / 操作记录 / 设置 四个页面已统一为新的桌面端布局，强调信息层级、卡片分区与更清晰的操作动线。任务详情页采用宽屏响应式**双列布局**与**可折叠文件树**，最大化利用屏幕空间
+- 🌓 **明暗双主题** — 内置浅色 / 深色主题切换，侧栏场景式主题开关支持动画过渡并持久化用户选择
+- 🖥️ **启动画面** — 赛博朋克风格 boot screen，消除启动时白屏
+- 🗃️ **本地 SQLite 持久化** — 所有任务数据与归档元信息存储在本地数据库，无需联网
+- 🌐 **国际化** — 支持简体中文（默认）与英文切换
 
-## 技术栈
+## 🛠️ 技术栈
 
 | 层 | 技术 |
 |---|---|
@@ -88,7 +94,7 @@
 | RAR 解析 | unrar |
 | GPU 加速 | [hashcat](https://hashcat.net/)（用户自行安装，自动检测） |
 
-## 项目结构
+## 📁 项目结构
 
 ```
 ArchiveFlow/
@@ -129,7 +135,7 @@ ArchiveFlow/
 └── fixtures/zip/               # 测试用压缩包
 ```
 
-## 本地开发
+## 💻 本地开发
 
 ### 前置依赖
 
@@ -176,7 +182,7 @@ npm run build
 npm run tauri build
 ```
 
-## GPU 加速配置
+## 🎮 GPU 加速配置
 
 GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZip 或 PKZIP/ZipCrypto）**。
 
@@ -202,7 +208,7 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 | 暂停/继续 | 不支持（取消后需重新启动） |
 | CUDA | 推荐安装 CUDA SDK；未安装时自动回退 OpenCL |
 
-## 任务状态机
+## 🔄 任务状态机
 
 任务在生命周期内流转以下 8 种状态：
 
@@ -217,7 +223,7 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
         └─→ 已中断 (interrupted)   程序异常退出后恢复检测
 ```
 
-## 当前边界
+## 🚧 当前边界
 
 - 归档恢复目标：ZIP / 7Z / RAR（GPU 加速当前仅 ZIP）
 - 恢复模式：字典 / 暴力 / 掩码
@@ -227,7 +233,7 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 - 恢复结果与断点默认保存在本地 SQLite；不依赖云端
 - 当前主题系统聚焦桌面端窗口体验，主要适配浅色 / 深色双主题与常见桌面分辨率
 
-## 测试夹具
+## 🧪 测试夹具
 
 `fixtures/zip/` 目录包含以下测试文件：
 
@@ -241,7 +247,7 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 | `empty.zip` | 空归档 |
 | `many-files.zip` | 100 个文件 |
 
-## 开发路线图
+## 🗺️ 开发路线图
 
 - [x] 项目脚手架（Tauri 2 + React + Rust）
 - [x] 归档导入与检测（ZIP / 7Z / RAR）
@@ -263,6 +269,6 @@ GPU 恢复依赖 hashcat V1 集成，当前仅支持 **Windows + ZIP（AES/WinZi
 - [ ] 调度器重试 / 公平性增强
 - [ ] Tauri 真实端到端自动化测试
 
-## 许可证
+## 📄 许可证
 
 MIT
