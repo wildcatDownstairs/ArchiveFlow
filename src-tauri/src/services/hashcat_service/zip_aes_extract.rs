@@ -64,14 +64,33 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
     let mut archive =
         zip::ZipArchive::new(file).map_err(|error| format!("解析 ZIP 文件失败: {}", error))?;
 
+    // 选择压缩后体积最小的 AES 加密文件条目（且在 8 MiB 限制以内）。
+    // 这样即使 ZIP 包含超大文件，只要有任意一个小文件就能提取 hash。
+    // 任意一个条目的 hash 都能破解整个 ZIP（同一密码加密所有条目）。
     let target_index = (0..archive.len())
-        .find(|index| {
-            archive
-                .by_index_raw(*index)
-                .map(|entry| entry.encrypted() && entry.is_file())
-                .unwrap_or(false)
+        .filter_map(|index| {
+            archive.by_index_raw(index).ok().and_then(|entry| {
+                if !entry.encrypted() || !entry.is_file() {
+                    return None;
+                }
+                let extra = entry.extra_data()?;
+                if find_winzip_aes_field(extra).is_none() {
+                    return None;
+                }
+                let size = entry.compressed_size();
+                // 粗略过滤：overhead 最多 28 字节，用宽松上限即可
+                if size > MAX_ZIP_AES_CONTENT_SIZE + 28 {
+                    return None;
+                }
+                Some((index, size))
+            })
         })
-        .ok_or_else(|| "ZIP 中没有可用于 GPU 的加密文件条目".to_string())?;
+        .min_by_key(|(_, size)| *size)
+        .map(|(index, _)| index)
+        .ok_or_else(|| {
+            "ZIP 中没有可用于 GPU 的加密文件条目（所有 AES 条目均超过 8 MB，请改用 CPU 引擎进行恢复）"
+                .to_string()
+        })?;
 
     let entry = archive
         .by_index_raw(target_index)
@@ -104,8 +123,8 @@ pub fn extract_zip_aes_hash(file_path: &Path) -> Result<HashcatZipHash, String> 
 
     let aes_overhead = salt_len as u64 + 2 + 10;
 
-    // 大文件保护：mode 13600 ($zip2$) 需要把完整密文体嵌入 hash 字符串。
-    // hashcat 自身对这段 `data` 有 8 MiB 的硬上限，超出时会直接拒收 hash。
+    // 精确大小校验：此时已知 salt_len，做精确判断。
+    // 正常情况下粗略过滤已拦截超大条目，这里作为最后一道保险。
     if compressed_size > MAX_ZIP_AES_CONTENT_SIZE + aes_overhead {
         let encrypted_content_size = compressed_size.saturating_sub(aes_overhead);
         return Err(format!(
@@ -175,15 +194,34 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("解析 ZIP 文件失败: {}", e))?;
 
-    // Find the first encrypted file entry
+    // 选择压缩后体积最小的 PKZIP 加密文件条目（且在 320 KB 限制以内）。
+    // 这样即使 ZIP 包含超大文件，只要有任意一个小文件就能提取 hash。
+    // 任意一个条目的 hash 都能破解整个 ZIP（同一密码加密所有条目）。
     let target_index = (0..archive.len())
-        .find(|index| {
-            archive
-                .by_index_raw(*index)
-                .map(|entry| entry.encrypted() && entry.is_file())
-                .unwrap_or(false)
+        .filter_map(|index| {
+            archive.by_index_raw(index).ok().and_then(|entry| {
+                if !entry.encrypted() || !entry.is_file() {
+                    return None;
+                }
+                // 排除 AES 条目（本函数只处理 PKZIP 传统加密）
+                if let Some(extra) = entry.extra_data() {
+                    if find_winzip_aes_field(extra).is_some() {
+                        return None;
+                    }
+                }
+                let size = entry.compressed_size();
+                if size > MAX_PKZIP_DATA_SIZE {
+                    return None;
+                }
+                Some((index, size))
+            })
         })
-        .ok_or_else(|| "ZIP 中没有加密文件条目".to_string())?;
+        .min_by_key(|(_, size)| *size)
+        .map(|(index, _)| index)
+        .ok_or_else(|| {
+            "ZIP 中没有满足条件的 PKZIP 加密文件条目（所有条目均超过 320 KB，请改用 CPU 引擎进行恢复）"
+                .to_string()
+        })?;
 
     let entry = archive
         .by_index_raw(target_index)
@@ -221,10 +259,7 @@ pub fn extract_zip_pkzip_hash(file_path: &Path) -> Result<HashcatZipHash, String
     drop(entry);
     drop(archive);
 
-    // 大文件保护：PKZIP mode 17200 / 17210 必须把完整加密数据嵌入 hash 字符串，
-    // 而 hashcat 自身对这段数据有 320 KiB 的硬上限。超过后不会开始跑密码，
-    // 而是直接报 `Token length exception / No hashes loaded`。此处提前拦截并
-    // 引导用户改用 CPU 引擎。
+    // 最终大小保险：filter_map 阶段已过滤，理论上不会触发，保留以防万一。
     if compressed_size > MAX_PKZIP_DATA_SIZE {
         return Err(format!(
             "PKZIP 加密条目过大（{:.1} KB），GPU 模式不支持（hashcat 最多接受 320 KB 压缩数据）。请改用 CPU 引擎进行恢复",
