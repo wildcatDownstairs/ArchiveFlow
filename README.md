@@ -4,6 +4,42 @@
 
 > 仅应用于你有权访问、审计、恢复或测试的归档文件。请勿用于未授权目标。
 
+## 界面预览
+
+<div align="center">
+  <img src="src/imgs/dark-home.png" width="49%" alt="Home - Dark Mode" />
+  <img src="src/imgs/light-home.png" width="49%" alt="Home - Light Mode" />
+</div>
+
+<details>
+<summary><b>点击展开查看更多功能截图</b></summary>
+
+### 任务管理
+<div align="center">
+  <img src="src/imgs/dark-task.png" width="49%" alt="Tasks - Dark Mode" />
+  <img src="src/imgs/light-task.png" width="49%" alt="Tasks - Light Mode" />
+</div>
+
+### 密码恢复详情
+<div align="center">
+  <img src="src/imgs/dark-detail.png" width="49%" alt="Detail - Dark Mode" />
+  <img src="src/imgs/light-detail.png" width="49%" alt="Detail - Light Mode" />
+</div>
+
+### 操作审计记录
+<div align="center">
+  <img src="src/imgs/dark-history.png" width="49%" alt="History - Dark Mode" />
+  <img src="src/imgs/light-history.png" width="49%" alt="History - Light Mode" />
+</div>
+
+### 设置与配置
+<div align="center">
+  <img src="src/imgs/dark-setting.png" width="49%" alt="Settings - Dark Mode" />
+  <img src="src/imgs/light-setting.png" width="49%" alt="Settings - Light Mode" />
+</div>
+
+</details>
+
 ## 功能特性
 
 - **归档导入与检测** — 支持 ZIP / 7Z / RAR，自动检测加密状态、条目列表与常见元数据
