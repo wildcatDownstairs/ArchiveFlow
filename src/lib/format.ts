@@ -57,6 +57,44 @@ export function formatElapsed(seconds: number): string {
 }
 
 /**
+ * 将大数字格式化为中文量级的粗略表示，末尾加"余"。
+ * 例如: 663_420_431_289_062 → "663兆4200亿余"
+ *       6_634_204_312 → "66亿3420万余"
+ *       800_237_568 → "8亿余"
+ *       3_450_000 → "345万余"
+ *       12_000 → "1万2000余"
+ *       999 → "999"（小数字直接返回原始逗号格式）
+ *
+ * 规则：取最高两个非零量级显示，不足两级时只显示一级。
+ */
+export function formatCompactChinese(n: number): string {
+  if (n < 10_000) return n.toLocaleString()
+
+  const 兆 = 1_000_000_000_000
+  const 亿 = 100_000_000
+  const 万 = 10_000
+
+  if (n >= 兆) {
+    const zhaoVal = Math.floor(n / 兆)
+    const remainder = n % 兆
+    const yiVal = Math.floor(remainder / 亿)
+    return yiVal > 0 ? `${zhaoVal}兆${yiVal}00亿余` : `${zhaoVal}兆余`
+  }
+
+  if (n >= 亿) {
+    const yiVal = Math.floor(n / 亿)
+    const remainder = n % 亿
+    const wanVal = Math.floor(remainder / 万)
+    return wanVal > 0 ? `${yiVal}亿${wanVal}万余` : `${yiVal}亿余`
+  }
+
+  // 万级
+  const wanVal = Math.floor(n / 万)
+  const remainder = n % 万
+  return remainder > 0 ? `${wanVal}万${remainder}余` : `${wanVal}万余`
+}
+
+/**
  * 将每秒密码尝试数格式化为易读的缩写形式。
  * 例如: 118845703 → "118.8M", 1500 → "1,500", 2300000000 → "2.30G"
  */

@@ -31,7 +31,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog"
 import { readTextFile } from "@tauri-apps/plugin-fs"
 import { cn } from "@/lib/utils"
-import { formatDateTime, formatElapsed, formatSpeed } from "@/lib/format"
+import { formatCompactChinese, formatDateTime, formatElapsed, formatSpeed } from "@/lib/format"
 import {
   describeObservedMode,
   estimateEtaSeconds,
@@ -704,7 +704,10 @@ const handleCopy = async (password: string) => {
           <div className="text-sm text-blue-900">
             <div className="font-medium">{t("recovery_resume_available")}</div>
             <div className="text-blue-700">
-              {t("tried_count")}: {checkpoint.tried.toLocaleString()} / {checkpoint.total.toLocaleString()}
+              {t("tried_count")}:{" "}
+              <span title={checkpoint.tried.toLocaleString()}>{formatCompactChinese(checkpoint.tried)}</span>
+              {" / "}
+              <span title={checkpoint.total.toLocaleString()}>{formatCompactChinese(checkpoint.total)}</span>
             </div>
             <div className="text-blue-700">
               {t("scheduler_priority")}: {checkpoint.priority}
@@ -827,7 +830,7 @@ const handleCopy = async (password: string) => {
           </div>
           {progress?.status === "found" && (
             <div className="text-xs text-green-600">
-              {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
+              {t("tried_count")}: <span title={progress.tried.toLocaleString()}>{formatCompactChinese(progress.tried)}</span> |{" "}
               {t("elapsed_time")}: {formatElapsed(progress.elapsed_seconds)}
             </div>
           )}
@@ -866,7 +869,7 @@ const handleCopy = async (password: string) => {
                   </div>
                   {progress && progress.status !== "running" && (
                     <span className="text-sm text-muted-foreground ml-auto">
-                      {t("tried_count")}: {progress.tried.toLocaleString()} |{" "}
+                      {t("tried_count")}: <span title={progress.tried.toLocaleString()}>{formatCompactChinese(progress.tried)}</span> |{" "}
                       {t("elapsed_time")}:{" "}
                       {formatElapsed(progress.elapsed_seconds)}
                     </span>
@@ -916,14 +919,20 @@ const handleCopy = async (password: string) => {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
               <div>
                 <span className="text-muted-foreground">{t("tried_count")}</span>
-                <p className="font-mono font-medium">
-                  {progress.tried.toLocaleString()}
+                <p
+                  className="font-mono font-medium cursor-default"
+                  title={progress.tried.toLocaleString()}
+                >
+                  {formatCompactChinese(progress.tried)}
                 </p>
               </div>
               <div>
                 <span className="text-muted-foreground">{t("total_count")}</span>
-                <p className="font-mono font-medium">
-                  {progress.total.toLocaleString()}
+                <p
+                  className="font-mono font-medium cursor-default"
+                  title={progress.total.toLocaleString()}
+                >
+                  {formatCompactChinese(progress.total)}
                 </p>
               </div>
               <div>
