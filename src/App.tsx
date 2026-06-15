@@ -9,6 +9,7 @@
 import { useState } from "react"
 import AppRouter from "@/router"
 import BootScreen from "@/components/BootScreen"
+import FloatingLogButton from "@/components/FloatingLogButton"
 
 /**
  * 该方法/组件暂无详细描述，由自动脚本补充
@@ -17,11 +18,16 @@ import BootScreen from "@/components/BootScreen"
 function App() {
   const [isBooting, setIsBooting] = useState(true)
 
-  if (isBooting) {
-    return <BootScreen onComplete={() => setIsBooting(false)} />
-  }
-
-  return <AppRouter />
+  return (
+    <>
+      {isBooting ? (
+        <BootScreen onComplete={() => setIsBooting(false)} />
+      ) : (
+        <AppRouter />
+      )}
+      <FloatingLogButton />
+    </>
+  )
 }
 
 export default App

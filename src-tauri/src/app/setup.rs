@@ -1,6 +1,7 @@
 use crate::db::Database;
 use crate::domain::audit::AuditEventType;
 use crate::domain::recovery::{RecoveryManager, RecoveryScheduler};
+use crate::services::app_log_service;
 use crate::services::audit_service;
 use tauri::Manager;
 
@@ -24,12 +25,43 @@ pub(crate) fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri:
         // app_data_dir 是跨平台的应用数据目录。
         // 把数据库、缓存等持久化文件都放在这里，符合桌面应用的约定。
         let app_dir = app.path().app_data_dir().expect("无法获取应用数据目录");
-        std::fs::create_dir_all(&app_dir).expect("无法创建应用数据目录");
-        let db = Database::new(app_dir).expect("数据库初始化失败");
+        let _ = app_log_service::append_app_log(
+            app.handle(),
+            "INFO",
+            Some("process"),
+            &format!("ArchiveFlow 启动初始化开始: app_data_dir={}", app_dir.display()),
+        );
+        if let Err(error) = std::fs::create_dir_all(&app_dir) {
+            let _ = app_log_service::append_app_log(
+                app.handle(),
+                "ERROR",
+                Some("process"),
+                &format!("创建应用数据目录失败: {}", error),
+            );
+            panic!("无法创建应用数据目录: {}", error);
+        }
+        let db = match Database::new(app_dir.clone()) {
+            Ok(db) => db,
+            Err(error) => {
+                let _ = app_log_service::append_app_log(
+                    app.handle(),
+                    "ERROR",
+                    Some("process"),
+                    &format!("数据库初始化失败: {}", error),
+                );
+                panic!("数据库初始化失败: {}", error);
+            }
+        };
 
         // 启动时把残留 processing 任务修正成 interrupted，避免 UI 永久卡在处理中。
         let interrupted_tasks = db.interrupt_processing_tasks().unwrap_or_else(|error| {
             log::error!("启动残留任务修复失败: {error}");
+            let _ = app_log_service::append_app_log(
+                app.handle(),
+                "ERROR",
+                Some("process"),
+                &format!("启动残留任务修复失败: {}", error),
+            );
             vec![]
         });
         for task in interrupted_tasks {
@@ -48,6 +80,12 @@ pub(crate) fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri:
         app.manage(RecoveryScheduler::new());
 
         log::info!("ArchiveFlow 启动成功");
+        let _ = app_log_service::append_app_log(
+            app.handle(),
+            "INFO",
+            Some("process"),
+            "ArchiveFlow 后端初始化完成",
+        );
         Ok(())
     })
 }

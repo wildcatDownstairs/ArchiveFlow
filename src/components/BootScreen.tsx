@@ -16,10 +16,21 @@ interface Props {
 }
 
 const TOTAL_STEPS = 6
+const BOOT_STEP_WARN_MS = 8000
 
 // Each step: label key + the async work to perform
 // Steps run sequentially; each resolves before the next begins.
 type StepRunner = () => Promise<void>
+interface BootStep {
+  logLabel: string
+  run: StepRunner
+  warnAfterMs?: number
+}
+
+function formatBootError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
 
 /**
  *
@@ -57,19 +68,37 @@ export default function BootScreen({ onComplete }: Props) {
     if (ran.current) return
     ran.current = true
 
-    const steps: StepRunner[] = [
+    const steps: BootStep[] = [
       // Step 1: i18n is already initialised synchronously; small delay for visual effect
-      () => new Promise((r) => setTimeout(r, 180)),
+      {
+        logLabel: "初始化运行时环境",
+        run: () => new Promise((r) => setTimeout(r, 180)),
+      },
       // Step 2: ping backend via getStats
-      () => api.getStats().then(() => undefined).catch(() => undefined),
+      {
+        logLabel: "建立数据库连接",
+        run: () => api.getStats().then(() => undefined),
+      },
       // Step 3: load tasks into store
-      () => fetchTasks(),
+      {
+        logLabel: "加载任务列表",
+        run: () => fetchTasks(),
+      },
       // Step 4: prefetch recent audit events (fire-and-forget on error)
-      () => api.getAuditEvents(50).then(() => undefined).catch(() => undefined),
+      {
+        logLabel: "读取审计记录",
+        run: () => api.getAuditEvents(50).then(() => undefined),
+      },
       // Step 5: localStorage prefs are read synchronously at store init; small delay
-      () => new Promise((r) => setTimeout(r, 80)),
+      {
+        logLabel: "同步应用配置",
+        run: () => new Promise((r) => setTimeout(r, 80)),
+      },
       // Step 6: final "ready" pause before fade-out
-      () => new Promise((r) => setTimeout(r, 400)),
+      {
+        logLabel: "系统就绪",
+        run: () => new Promise((r) => setTimeout(r, 400)),
+      },
     ]
 
     /**
@@ -77,12 +106,49 @@ export default function BootScreen({ onComplete }: Props) {
  * @returns {any} 默认返回
  */
     async function run() {
+      api.recordAppLog("INFO", "boot", "启动流程开始")
       for (let i = 0; i < steps.length; i++) {
+        const step = steps[i]
+        const stepNumber = i + 1
+        const startedAt = performance.now()
+        let warned = false
+        const warningTimer = window.setTimeout(() => {
+          warned = true
+          api.recordAppLog(
+            "WARN",
+            "boot",
+            `启动步骤耗时超过 ${step.warnAfterMs ?? BOOT_STEP_WARN_MS}ms: ${step.logLabel}`,
+          )
+        }, step.warnAfterMs ?? BOOT_STEP_WARN_MS)
+
         setCurrentStep(i + 1)
-        await steps[i]()
+        api.recordAppLog(
+          "INFO",
+          "boot",
+          `启动步骤 ${stepNumber}/${steps.length} 开始: ${step.logLabel}`,
+        )
+        try {
+          await step.run()
+          const elapsedMs = Math.round(performance.now() - startedAt)
+          api.recordAppLog(
+            "INFO",
+            "boot",
+            `启动步骤 ${stepNumber}/${steps.length} 完成: ${step.logLabel} (${elapsedMs}ms${warned ? ", 曾超时预警" : ""})`,
+          )
+        } catch (error) {
+          const elapsedMs = Math.round(performance.now() - startedAt)
+          api.recordAppLog(
+            "ERROR",
+            "error",
+            `启动步骤 ${stepNumber}/${steps.length} 失败: ${step.logLabel} (${elapsedMs}ms): ${formatBootError(error)}`,
+          )
+        } finally {
+          window.clearTimeout(warningTimer)
+        }
       }
       setCurrentStep(TOTAL_STEPS + 1) // all done
       setFadingOut(true)
+      api.recordAppLog("INFO", "boot", "启动流程完成，进入主界面")
       // wait for fade-out animation (600ms) then unmount
       setTimeout(onComplete, 600)
     }

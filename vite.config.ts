@@ -18,6 +18,9 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      ignored: ['**/src-tauri/target/**'],
+    },
   },
   // produce sourcemaps for debug builds
   build: {

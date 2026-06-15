@@ -1,3 +1,4 @@
+pub mod app_log_commands;
 pub mod archive_commands;
 pub mod audit_commands;
 pub mod export_commands;

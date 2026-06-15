@@ -23,12 +23,74 @@ import type {
   HashcatDetectionResult,
 } from "@/types"
 
+type AppLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
+type AppLogCategory = "boot" | "ui" | "user" | "process" | "error"
+type CommandArgs = Record<string, unknown>
+
+interface CommandLogOptions {
+  category?: AppLogCategory
+  message?: string
+}
+
+function formatUnknownError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+function nowMs(): number {
+  return typeof performance === "undefined" ? Date.now() : performance.now()
+}
+
+export async function appendAppLog(
+  level: AppLogLevel,
+  category: AppLogCategory,
+  message: string,
+): Promise<void> {
+  return invoke<void>("append_app_log", { level, category, message })
+}
+
+export function recordAppLog(
+  level: AppLogLevel,
+  category: AppLogCategory,
+  message: string,
+): void {
+  void appendAppLog(level, category, message).catch(() => undefined)
+}
+
+async function invokeCommand<T>(
+  command: string,
+  args?: CommandArgs,
+  logOptions: CommandLogOptions = {},
+): Promise<T> {
+  const category = logOptions.category ?? "process"
+  const action = logOptions.message ?? `调用后端命令: ${command}`
+  const startedAt = nowMs()
+
+  recordAppLog("INFO", category, `${action} - 开始`)
+  try {
+    const result = await invoke<T>(command, args)
+    const elapsedMs = Math.round(nowMs() - startedAt)
+    recordAppLog("INFO", category, `${action} - 完成 (${elapsedMs}ms)`)
+    return result
+  } catch (error) {
+    const elapsedMs = Math.round(nowMs() - startedAt)
+    recordAppLog(
+      "ERROR",
+      "error",
+      `${action} - 失败 (${elapsedMs}ms): ${formatUnknownError(error)}`,
+    )
+    throw error
+  }
+}
+
 /**
  * 该方法/组件暂无详细描述，由自动脚本补充
  * @returns {any} 默认返回
  */
 export async function getTasks(): Promise<Task[]> {
-  return invoke<Task[]>("get_tasks")
+  return invokeCommand<Task[]>("get_tasks", undefined, {
+    message: "加载任务列表",
+  })
 }
 
 /**
@@ -43,7 +105,11 @@ export async function createTask(
   fileName: string,
   fileSize: number,
 ): Promise<Task> {
-  return invoke<Task>("create_task", { filePath, fileName, fileSize })
+  return invokeCommand<Task>(
+    "create_task",
+    { filePath, fileName, fileSize },
+    { category: "user", message: `创建任务: ${fileName}` },
+  )
 }
 
 /**
@@ -52,7 +118,9 @@ export async function createTask(
   * @returns {any} 执行结果
  */
 export async function getTask(taskId: string): Promise<Task | null> {
-  return invoke<Task | null>("get_task", { taskId })
+  return invokeCommand<Task | null>("get_task", { taskId }, {
+    message: `加载任务详情: ${taskId}`,
+  })
 }
 
 /**
@@ -61,7 +129,10 @@ export async function getTask(taskId: string): Promise<Task | null> {
   * @returns {any} 执行结果
  */
 export async function deleteTask(taskId: string): Promise<void> {
-  return invoke<void>("delete_task", { taskId })
+  return invokeCommand<void>("delete_task", { taskId }, {
+    category: "user",
+    message: `删除任务: ${taskId}`,
+  })
 }
 
 /**
@@ -76,7 +147,11 @@ export async function updateTaskStatus(
   status: Task["status"],
   errorMessage?: string | null,
 ): Promise<void> {
-  return invoke<void>("update_task_status", { taskId, status, errorMessage })
+  return invokeCommand<void>(
+    "update_task_status",
+    { taskId, status, errorMessage },
+    { category: "user", message: `更新任务状态: ${taskId} -> ${status}` },
+  )
 }
 
 /**
@@ -87,7 +162,10 @@ export async function updateTaskStatus(
 export async function inspectArchive(
   filePath: string,
 ): Promise<ArchiveInfo> {
-  return invoke<ArchiveInfo>("inspect_archive", { filePath })
+  return invokeCommand<ArchiveInfo>("inspect_archive", { filePath }, {
+    category: "process",
+    message: "检测压缩包",
+  })
 }
 
 /// 一站式导入：创建任务 + 检测归档内容
@@ -103,7 +181,11 @@ export async function importArchive(
   fileName: string,
   fileSize: number,
 ): Promise<Task> {
-  return invoke<Task>("import_archive", { filePath, fileName, fileSize })
+  return invokeCommand<Task>(
+    "import_archive",
+    { filePath, fileName, fileSize },
+    { category: "user", message: `导入压缩包: ${fileName}` },
+  )
 }
 
 // --- 密码恢复 ---
@@ -127,14 +209,21 @@ export async function startRecovery(
   backend?: RecoveryBackend,
   hashcatPath?: string,
 ): Promise<ScheduledRecoveryState> {
-  return invoke<ScheduledRecoveryState>("start_recovery", {
-    taskId,
-    mode,
-    configJson,
-    priority: priority ?? null,
-    backend: backend ?? "cpu",
-    hashcatPath: hashcatPath?.trim() || null,
-  })
+  return invokeCommand<ScheduledRecoveryState>(
+    "start_recovery",
+    {
+      taskId,
+      mode,
+      configJson,
+      priority: priority ?? null,
+      backend: backend ?? "cpu",
+      hashcatPath: hashcatPath?.trim() || null,
+    },
+    {
+      category: "user",
+      message: `启动恢复: task=${taskId}, mode=${mode}, backend=${backend ?? "cpu"}`,
+    },
+  )
 }
 
 /**
@@ -145,9 +234,13 @@ export async function startRecovery(
 export async function detectHashcat(
   customPath?: string,
 ): Promise<HashcatDetectionResult> {
-  return invoke<HashcatDetectionResult>("detect_hashcat", {
-    customPath: customPath?.trim() ? customPath.trim() : null,
-  })
+  return invokeCommand<HashcatDetectionResult>(
+    "detect_hashcat",
+    {
+      customPath: customPath?.trim() ? customPath.trim() : null,
+    },
+    { message: "检测 hashcat 环境" },
+  )
 }
 
 /// 取消密码恢复
@@ -157,7 +250,10 @@ export async function detectHashcat(
   * @returns {any} 执行结果
  */
 export async function cancelRecovery(taskId: string): Promise<void> {
-  return invoke<void>("cancel_recovery", { taskId })
+  return invokeCommand<void>("cancel_recovery", { taskId }, {
+    category: "user",
+    message: `取消恢复: ${taskId}`,
+  })
 }
 
 /**
@@ -168,7 +264,11 @@ export async function cancelRecovery(taskId: string): Promise<void> {
 export async function getRecoveryCheckpoint(
   taskId: string,
 ): Promise<RecoveryCheckpoint | null> {
-  return invoke<RecoveryCheckpoint | null>("get_recovery_checkpoint", { taskId })
+  return invokeCommand<RecoveryCheckpoint | null>(
+    "get_recovery_checkpoint",
+    { taskId },
+    { message: `读取恢复断点: ${taskId}` },
+  )
 }
 
 /**
@@ -177,7 +277,10 @@ export async function getRecoveryCheckpoint(
   * @returns {any} 执行结果
  */
 export async function resumeRecovery(taskId: string): Promise<ScheduledRecoveryState> {
-  return invoke<ScheduledRecoveryState>("resume_recovery", { taskId })
+  return invokeCommand<ScheduledRecoveryState>("resume_recovery", { taskId }, {
+    category: "user",
+    message: `继续恢复: ${taskId}`,
+  })
 }
 
 /**
@@ -188,7 +291,11 @@ export async function resumeRecovery(taskId: string): Promise<ScheduledRecoveryS
 export async function getScheduledRecovery(
   taskId: string,
 ): Promise<ScheduledRecovery | null> {
-  return invoke<ScheduledRecovery | null>("get_scheduled_recovery", { taskId })
+  return invokeCommand<ScheduledRecovery | null>(
+    "get_scheduled_recovery",
+    { taskId },
+    { message: `读取恢复调度状态: ${taskId}` },
+  )
 }
 
 /**
@@ -196,7 +303,11 @@ export async function getScheduledRecovery(
  * @returns {any} 默认返回
  */
 export async function getRecoverySchedulerSnapshot(): Promise<RecoverySchedulerSnapshot> {
-  return invoke<RecoverySchedulerSnapshot>("get_recovery_scheduler_snapshot")
+  return invokeCommand<RecoverySchedulerSnapshot>(
+    "get_recovery_scheduler_snapshot",
+    undefined,
+    { message: "读取恢复调度快照" },
+  )
 }
 
 /**
@@ -207,9 +318,16 @@ export async function getRecoverySchedulerSnapshot(): Promise<RecoverySchedulerS
 export async function setRecoverySchedulerLimit(
   maxConcurrent: number,
 ): Promise<RecoverySchedulerSnapshot> {
-  return invoke<RecoverySchedulerSnapshot>("set_recovery_scheduler_limit", {
-    maxConcurrent,
-  })
+  return invokeCommand<RecoverySchedulerSnapshot>(
+    "set_recovery_scheduler_limit",
+    {
+      maxConcurrent,
+    },
+    {
+      category: "user",
+      message: `设置恢复并发上限: ${maxConcurrent}`,
+    },
+  )
 }
 
 /**
@@ -218,7 +336,10 @@ export async function setRecoverySchedulerLimit(
   * @returns {any} 执行结果
  */
 export async function pauseRecovery(taskId: string): Promise<void> {
-  return invoke<void>("pause_recovery", { taskId })
+  return invokeCommand<void>("pause_recovery", { taskId }, {
+    category: "user",
+    message: `暂停恢复: ${taskId}`,
+  })
 }
 
 // --- Audit events ---
@@ -229,7 +350,11 @@ export async function pauseRecovery(taskId: string): Promise<void> {
   * @returns {any} 执行结果
  */
 export async function getAuditEvents(limit?: number): Promise<AuditEvent[]> {
-  return invoke<AuditEvent[]>("get_audit_events", { limit: limit ?? null })
+  return invokeCommand<AuditEvent[]>(
+    "get_audit_events",
+    { limit: limit ?? null },
+    { message: `读取审计日志: limit=${limit ?? 100}` },
+  )
 }
 
 /**
@@ -238,7 +363,9 @@ export async function getAuditEvents(limit?: number): Promise<AuditEvent[]> {
   * @returns {any} 执行结果
  */
 export async function getTaskAuditEvents(taskId: string): Promise<AuditEvent[]> {
-  return invoke<AuditEvent[]>("get_task_audit_events", { taskId })
+  return invokeCommand<AuditEvent[]>("get_task_audit_events", { taskId }, {
+    message: `读取任务审计日志: ${taskId}`,
+  })
 }
 
 // --- Recovery progress listener ---
@@ -262,7 +389,9 @@ export function onRecoveryProgress(
  * @returns {any} 默认返回
  */
 export async function getAppDataDir(): Promise<string> {
-  return invoke<string>("get_app_data_dir")
+  return invokeCommand<string>("get_app_data_dir", undefined, {
+    message: "读取应用数据目录",
+  })
 }
 
 /**
@@ -270,7 +399,10 @@ export async function getAppDataDir(): Promise<string> {
  * @returns {any} 默认返回
  */
 export async function clearAllTasks(): Promise<number> {
-  return invoke<number>("clear_all_tasks")
+  return invokeCommand<number>("clear_all_tasks", undefined, {
+    category: "user",
+    message: "清空全部任务",
+  })
 }
 
 /**
@@ -278,7 +410,10 @@ export async function clearAllTasks(): Promise<number> {
  * @returns {any} 默认返回
  */
 export async function clearAuditEvents(): Promise<number> {
-  return invoke<number>("clear_audit_events")
+  return invokeCommand<number>("clear_audit_events", undefined, {
+    category: "user",
+    message: "清空审计日志",
+  })
 }
 
 /**
@@ -293,11 +428,15 @@ export async function recordSettingChange(
   oldValue: string | null,
   newValue: string,
 ): Promise<void> {
-  return invoke<void>("record_setting_change", {
-    settingKey,
-    oldValue,
-    newValue,
-  })
+  return invokeCommand<void>(
+    "record_setting_change",
+    {
+      settingKey,
+      oldValue,
+      newValue,
+    },
+    { category: "user", message: `记录设置变更: ${settingKey}` },
+  )
 }
 
 /**
@@ -305,7 +444,9 @@ export async function recordSettingChange(
  * @returns {any} 默认返回
  */
 export async function getStats(): Promise<[number, number]> {
-  return invoke<[number, number]>("get_stats")
+  return invokeCommand<[number, number]>("get_stats", undefined, {
+    message: "读取应用统计",
+  })
 }
 
 // --- Export ---
@@ -322,5 +463,25 @@ export async function exportTasks(
   format: ExportFormat,
   options?: ExportOptions,
 ): Promise<string> {
-  return invoke<string>("export_tasks", { taskIds, format, options: options ?? null })
+  return invokeCommand<string>(
+    "export_tasks",
+    { taskIds, format, options: options ?? null },
+    {
+      category: "user",
+      message: `导出任务: count=${taskIds.length}, format=${format}`,
+    },
+  )
+}
+
+export async function getLogDir(): Promise<string> {
+  return invokeCommand<string>("get_log_dir", undefined, {
+    message: "读取文本日志目录",
+  })
+}
+
+export async function openLogDir(): Promise<string> {
+  return invokeCommand<string>("open_log_dir", undefined, {
+    category: "user",
+    message: "打开文本日志目录",
+  })
 }
