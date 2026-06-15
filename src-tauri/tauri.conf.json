@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ArchiveFlow",
-  "version": "26.2.33",
+  "version": "26.6.15",
   "identifier": "com.archiveflow.app",
   "build": {
     "frontendDist": "../dist",
