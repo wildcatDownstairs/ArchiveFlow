@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/core", "crates/desktop"]
+default-members = ["crates/desktop"]
+resolver = "2"
+
+[workspace.package]
+version = "26.6.15"
+edition = "2024"
+license = "MIT"
+rust-version = "1.94"
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

@@ -23,9 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# Rust / Tauri
-src-tauri/target/
-src-tauri/gen/
+# Rust
+target/
+artifacts/
 
 # App data / database
 *.db
